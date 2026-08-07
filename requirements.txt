@@ -1,0 +1,2 @@
+pypdf
+langchain langchain-community langchain-text-splitters
