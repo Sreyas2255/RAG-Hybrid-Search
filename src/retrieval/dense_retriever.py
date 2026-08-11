@@ -24,7 +24,31 @@ def dense_search(query: str, top_k: int = 5):
         n_results=top_k,
     )
 
-    return results
+    # Extract ChromaDB results
+    documents = results["documents"][0]
+    metadatas = results["metadatas"][0]
+    distances = results["distances"][0]
+    ids = results["ids"][0]
+
+    # Convert results into a common format
+    formatted_results = []
+
+    for document_id, document, metadata, distance in zip(
+        ids,
+        documents,
+        metadatas,
+        distances,
+    ):
+        formatted_results.append(
+            {
+                "id": document_id,
+                "document": document,
+                "metadata": metadata,
+                "score": distance,
+            }
+        )
+
+    return formatted_results
 
 
 if __name__ == "__main__":
@@ -37,22 +61,18 @@ if __name__ == "__main__":
     print("DENSE RETRIEVAL RESULTS")
     print("==============================")
 
-    documents = results["documents"][0]
-    metadatas = results["metadatas"][0]
-    distances = results["distances"][0]
-
-    for i, (document, metadata, distance) in enumerate(
-        zip(documents, metadatas, distances),
-        start=1,
-    ):
+    for i, result in enumerate(results, start=1):
 
         print(f"\n--- Result {i} ---")
 
-        print("Distance:", distance)
+        print("ID:", result["id"])
 
-        print("Source:", metadata.get("source"))
+        print("Distance:", result["score"])
 
-        print("Page:", metadata.get("page"))
+        print("Source:", result["metadata"].get("source"))
+
+        print("Page:", result["metadata"].get("page"))
 
         print("\nText:")
-        print(document[:500])
+
+        print(result["document"][:500])

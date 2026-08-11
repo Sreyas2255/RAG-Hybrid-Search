@@ -59,10 +59,14 @@ def bm25_search(bm25, chunks, query, top_k=5):
 
     for index in top_indexes:
 
-        results.append({
-            "document": chunks[index],
-            "score": scores[index],
-        })
+        results.append(
+            {
+                "id": f"chunk_{index}",
+                "document": chunks[index],
+                "metadata": chunks[index].metadata,
+                "score": scores[index],
+            }
+        )
 
     return results
 
@@ -86,16 +90,16 @@ if __name__ == "__main__":
 
     for i, result in enumerate(results, start=1):
 
-        document = result["document"]
-
         print(f"\n--- Result {i} ---")
+
+        print("ID:", result["id"])
 
         print("Score:", result["score"])
 
-        print("Source:", document.metadata.get("source"))
+        print("Source:", result["metadata"].get("source"))
 
-        print("Page:", document.metadata.get("page"))
+        print("Page:", result["metadata"].get("page"))
 
         print("\nText:")
 
-        print(document.page_content[:500])
+        print(result["document"].page_content[:500])
