@@ -1,2 +1,24 @@
 *.pdf
 .env
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# ChromaDB
+data/chroma/
+
+# Generated/processed data
+data/processed/
+data/chunks/
+
+# Hugging Face cache
+.cache/
+huggingface/

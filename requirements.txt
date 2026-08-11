@@ -1,7 +1,10 @@
 pypdf
-langchain langchain-community 
+langchain
+langchain-community 
 langchain-text-splitters
 sentence-transformers 
 langchain-huggingface
 chromadb
 rank-bm25
+groq
+python-dotenv
