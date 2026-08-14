@@ -1,11 +1,15 @@
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.retrieval.bm25_retriever import create_bm25_index
-from src.generation.rag_pipeline import rag_answer, get_reranker
+
+from src.generation.rag_pipeline import (
+    rag_answer,
+    get_reranker,
+)
 
 
 # ============================================================
@@ -30,34 +34,36 @@ async def lifespan(app: FastAPI):
     print("        STARTING RAG API")
     print("========================================")
 
-    try:
-        print("\nCreating BM25 index...")
+    # --------------------------------------------------------
+    # BUILD BM25 INDEX
+    # --------------------------------------------------------
 
-        bm25, chunks = create_bm25_index()
+    print("\nCreating BM25 index...")
 
-        print("\nBM25 index ready.")
-        print(f"Chunks loaded: {len(chunks)}")
+    bm25, chunks = create_bm25_index()
 
-        print("\nLoading reranker model...")
+    print("\nBM25 index ready.")
+    print(f"Chunks loaded: {len(chunks)}")
 
-        get_reranker()
+    # --------------------------------------------------------
+    # LOAD RERANKER
+    # --------------------------------------------------------
 
-        print("\nReranker ready.")
+    print("\nLoading reranker model...")
 
-        print("\n========================================")
-        print("        RAG API READY")
-        print("========================================")
+    get_reranker()
 
-    except Exception as error:
+    print("\nReranker ready.")
 
-        print(
-            f"\nRAG startup error: "
-            f"{type(error).__name__}: {error}"
-        )
-
-        raise
+    print("\n========================================")
+    print("        RAG API READY")
+    print("========================================")
 
     yield
+
+    # --------------------------------------------------------
+    # SHUTDOWN
+    # --------------------------------------------------------
 
     print("\n========================================")
     print("        SHUTTING DOWN RAG API")
@@ -65,17 +71,13 @@ async def lifespan(app: FastAPI):
 
 
 # ============================================================
-# FASTAPI APPLICATION
+# FASTAPI APP
 # ============================================================
 
 app = FastAPI(
     title="Hybrid RAG API",
-    description=(
-        "Production-style Retrieval-Augmented Generation API "
-        "using dense retrieval, BM25, RRF, cross-encoder reranking, "
-        "and grounded generation with citations."
-    ),
-    version="1.1.0",
+    description="Document Question Answering API",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -85,401 +87,241 @@ app = FastAPI(
 # ============================================================
 
 class QuestionRequest(BaseModel):
+
     question: str = Field(
         ...,
         min_length=1,
-        description="Question to ask about the indexed documents.",
-        examples=[
-            "What is a machine learning algorithm?"
-        ],
+        description="Question to ask the RAG system.",
     )
 
 
 # ============================================================
 # LEGACY RESPONSE MODEL
-# Keeps the existing /ask API compatible
 # ============================================================
 
 class QuestionResponse(BaseModel):
+
     question: str
     answer: str
 
 
 # ============================================================
-# STRUCTURED RESPONSE MODELS
-# Used by the new /v1/ask endpoint
+# V1 RESPONSE MODEL
 # ============================================================
 
-class SourceMetadata(BaseModel):
-    source: Optional[str] = None
-    page: Optional[Any] = None
-    section: Optional[str] = None
-    chunk_id: Optional[Any] = None
+class V1QuestionResponse(BaseModel):
 
-
-class Citation(BaseModel):
-    citation_id: int
-    source: Optional[str] = None
-    page: Optional[Any] = None
-    section: Optional[str] = None
-    chunk_id: Optional[Any] = None
-
-
-class AskResponse(BaseModel):
     question: str
+
     answer: str
-    citations: list[Citation] = Field(default_factory=list)
-    confidence: Optional[float] = None
-    sources: list[SourceMetadata] = Field(default_factory=list)
+
+    citations: list[Any] = Field(
+        default_factory=list
+    )
+
+    confidence: float | None = None
+
+    sources: list[Any] = Field(
+        default_factory=list
+    )
+
+    citation_verification: dict[str, Any] | None = None
+
+    # IMPORTANT:
+    #
+    # The RAG pipeline currently returns this as an INTEGER.
+    #
+    # Example:
+    #
+    #     retrieved_chunks = 5
+    #
+    # This means 5 chunks were retrieved/reranked.
+    #
+    # It is NOT a list of chunk objects.
+    #
+    retrieved_chunks: int = 0
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# HELPERS
 # ============================================================
 
-def _get_value(
-    obj: Any,
-    key: str,
-    default: Any = None,
-) -> Any:
+def normalize_pipeline_result(
+    result,
+    question: str,
+):
     """
-    Safely read a value from either:
+    Normalize the result returned by rag_answer().
 
-    - dictionary
-    - Pydantic model
-    - normal Python object
-    """
+    The structured RAG pipeline should return a dictionary
+    when return_details=True.
 
-    if obj is None:
-        return default
+    The current pipeline returns:
 
-    if isinstance(obj, dict):
-        return obj.get(key, default)
+        question
+        answer
+        citations
+        confidence
+        sources
+        citation_verification
+        retrieved_chunks
 
-    return getattr(obj, key, default)
+    IMPORTANT:
+        retrieved_chunks is currently an integer count,
+        e.g. 5.
 
-
-def _normalize_pipeline_result(
-    result: Any,
-) -> dict[str, Any]:
-    """
-    Normalize different possible rag_pipeline return formats.
-
-    Supported:
-
-    1. String:
-        "The answer is ... [1]"
-
-    2. Dictionary:
-        {
-            "answer": "...",
-            "citations": [...],
-            "confidence": 0.91,
-            "sources": [...]
-        }
-
-    3. Object:
-        object.answer
-        object.citations
-        object.confidence
-        object.sources
+    This function also safely handles a plain string result.
     """
 
     # --------------------------------------------------------
-    # STRING RESULT
+    # Structured result
     # --------------------------------------------------------
 
-    if isinstance(result, str):
+    if isinstance(result, dict):
 
-        return {
-            "answer": result,
-            "citations": [],
-            "confidence": None,
-            "sources": [],
-        }
+        # ----------------------------------------------------
+        # Normalize retrieved_chunks
+        # ----------------------------------------------------
 
-    # --------------------------------------------------------
-    # DICTIONARY / OBJECT RESULT
-    # --------------------------------------------------------
+        retrieved_chunks = result.get(
+            "retrieved_chunks",
+            0,
+        )
 
-    answer = _get_value(
-        result,
-        "answer",
-        "",
-    )
+        # The current pipeline returns an integer.
+        #
+        # We also protect the API in case the pipeline
+        # returns None or another unexpected value.
+        #
 
-    citations = _get_value(
-        result,
-        "citations",
-        [],
-    )
+        if retrieved_chunks is None:
 
-    confidence = _get_value(
-        result,
-        "confidence",
-        None,
-    )
+            retrieved_chunks = 0
 
-    sources = _get_value(
-        result,
-        "sources",
-        [],
-    )
+        elif isinstance(
+            retrieved_chunks,
+            int,
+        ):
 
-    # Some pipelines may call the field "source_metadata".
-    if not sources:
+            pass
 
-        sources = _get_value(
-            result,
-            "source_metadata",
+        elif isinstance(
+            retrieved_chunks,
+            list,
+        ):
+
+            # Backward-compatible support if the pipeline
+            # is changed later to return the actual chunks.
+            retrieved_chunks = len(
+                retrieved_chunks
+            )
+
+        else:
+
+            try:
+
+                retrieved_chunks = int(
+                    retrieved_chunks
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                retrieved_chunks = 0
+
+        # ----------------------------------------------------
+        # Normalize citations
+        # ----------------------------------------------------
+
+        citations = result.get(
+            "citations",
             [],
         )
 
-    # Some pipelines may use "confidence_score".
-    if confidence is None:
+        if citations is None:
 
-        confidence = _get_value(
-            result,
-            "confidence_score",
-            None,
+            citations = []
+
+        elif not isinstance(
+            citations,
+            list,
+        ):
+
+            citations = [citations]
+
+        # ----------------------------------------------------
+        # Normalize sources
+        # ----------------------------------------------------
+
+        sources = result.get(
+            "sources",
+            [],
         )
+
+        if sources is None:
+
+            sources = []
+
+        elif not isinstance(
+            sources,
+            list,
+        ):
+
+            sources = [sources]
+
+        # ----------------------------------------------------
+        # Return normalized result
+        # ----------------------------------------------------
+
+        return {
+            "question": result.get(
+                "question",
+                question,
+            ),
+
+            "answer": str(
+                result.get(
+                    "answer",
+                    "",
+                )
+            ),
+
+            "citations": citations,
+
+            "confidence": result.get(
+                "confidence",
+            ),
+
+            "sources": sources,
+
+            "citation_verification": result.get(
+                "citation_verification",
+            ),
+
+            "retrieved_chunks": retrieved_chunks,
+        }
+
+    # --------------------------------------------------------
+    # Plain string fallback
+    # --------------------------------------------------------
 
     return {
-        "answer": str(answer),
-        "citations": citations or [],
-        "confidence": confidence,
-        "sources": sources or [],
+        "question": question,
+
+        "answer": str(result),
+
+        "citations": [],
+
+        "confidence": None,
+
+        "sources": [],
+
+        "citation_verification": None,
+
+        "retrieved_chunks": 0,
     }
-
-
-def _normalize_citations(
-    citations: list[Any],
-) -> list[Citation]:
-    """
-    Convert pipeline citation information into
-    the API Citation schema.
-    """
-
-    normalized = []
-
-    for index, citation in enumerate(citations, start=1):
-
-        # --------------------------------------------
-        # Citation as integer
-        # --------------------------------------------
-
-        if isinstance(citation, int):
-
-            normalized.append(
-                Citation(
-                    citation_id=citation,
-                )
-            )
-
-            continue
-
-        # --------------------------------------------
-        # Citation as string
-        # --------------------------------------------
-
-        if isinstance(citation, str):
-
-            normalized.append(
-                Citation(
-                    citation_id=index,
-                    source=citation,
-                )
-            )
-
-            continue
-
-        # --------------------------------------------
-        # Citation as dictionary/object
-        # --------------------------------------------
-
-        citation_id = _get_value(
-            citation,
-            "citation_id",
-            index,
-        )
-
-        source = _get_value(
-            citation,
-            "source",
-        )
-
-        page = _get_value(
-            citation,
-            "page",
-        )
-
-        section = _get_value(
-            citation,
-            "section",
-        )
-
-        chunk_id = _get_value(
-            citation,
-            "chunk_id",
-        )
-
-        normalized.append(
-            Citation(
-                citation_id=citation_id,
-                source=source,
-                page=page,
-                section=section,
-                chunk_id=chunk_id,
-            )
-        )
-
-    return normalized
-
-
-def _normalize_sources(
-    sources: list[Any],
-) -> list[SourceMetadata]:
-    """
-    Convert source information into a consistent API format.
-    """
-
-    normalized = []
-
-    for source in sources:
-
-        # --------------------------------------------
-        # Source is a string
-        # --------------------------------------------
-
-        if isinstance(source, str):
-
-            normalized.append(
-                SourceMetadata(
-                    source=source,
-                )
-            )
-
-            continue
-
-        # --------------------------------------------
-        # Source is dictionary/object
-        # --------------------------------------------
-
-        normalized.append(
-            SourceMetadata(
-                source=_get_value(
-                    source,
-                    "source",
-                    _get_value(
-                        source,
-                        "source_document",
-                    ),
-                ),
-                page=_get_value(
-                    source,
-                    "page",
-                ),
-                section=_get_value(
-                    source,
-                    "section",
-                ),
-                chunk_id=_get_value(
-                    source,
-                    "chunk_id",
-                ),
-            )
-        )
-
-    return normalized
-
-
-def _extract_chunk_metadata(
-    chunk: Any,
-) -> SourceMetadata:
-    """
-    Extract metadata from a stored chunk.
-
-    This supports common chunk representations:
-
-    - dictionary
-    - object with metadata
-    - LangChain Document
-    """
-
-    metadata = _get_value(
-        chunk,
-        "metadata",
-        {},
-    )
-
-    if metadata is None:
-        metadata = {}
-
-    source = None
-    page = None
-    section = None
-    chunk_id = None
-
-    # --------------------------------------------
-    # Direct chunk fields
-    # --------------------------------------------
-
-    source = _get_value(
-        chunk,
-        "source",
-    )
-
-    page = _get_value(
-        chunk,
-        "page",
-    )
-
-    section = _get_value(
-        chunk,
-        "section",
-    )
-
-    chunk_id = _get_value(
-        chunk,
-        "chunk_id",
-    )
-
-    # --------------------------------------------
-    # Metadata fields
-    # --------------------------------------------
-
-    if isinstance(metadata, dict):
-
-        source = source or metadata.get(
-            "source"
-        )
-
-        source = source or metadata.get(
-            "source_document"
-        )
-
-        page = (
-            page
-            if page is not None
-            else metadata.get("page")
-        )
-
-        section = section or metadata.get(
-            "section"
-        )
-
-        chunk_id = (
-            chunk_id
-            if chunk_id is not None
-            else metadata.get("chunk_id")
-        )
-
-    return SourceMetadata(
-        source=source,
-        page=page,
-        section=section,
-        chunk_id=chunk_id,
-    )
 
 
 # ============================================================
@@ -488,9 +330,6 @@ def _extract_chunk_metadata(
 
 @app.get("/")
 def root():
-    """
-    API root endpoint.
-    """
 
     return {
         "message": "Hybrid RAG API is running",
@@ -504,17 +343,236 @@ def root():
 # HEALTH CHECK
 # ============================================================
 
-@app.get(
-    "/health",
-    summary="Health check",
-    description="Check whether the RAG resources are ready.",
-)
+@app.get("/health")
 def health():
 
     return {
         "status": "healthy",
-        "bm25_ready": bm25 is not None,
-        "chunks_loaded": len(chunks) if chunks else 0,
+
+        "bm25_ready": (
+            bm25 is not None
+        ),
+
+        "chunks_loaded": (
+            len(chunks)
+            if chunks
+            else 0
+        ),
+    }
+
+
+# ============================================================
+# STATUS ENDPOINT
+# ============================================================
+
+@app.get("/v1/status")
+def status():
+
+    # --------------------------------------------------------
+    # Check reranker
+    # --------------------------------------------------------
+
+    try:
+
+        import src.generation.rag_pipeline as rag_pipeline
+
+        reranker_loaded = (
+            getattr(
+                rag_pipeline,
+                "_reranker",
+                None,
+            )
+            is not None
+        )
+
+    except Exception:
+
+        reranker_loaded = False
+
+    # --------------------------------------------------------
+    # Return status
+    # --------------------------------------------------------
+
+    return {
+
+        "status": (
+            "ready"
+            if (
+                bm25 is not None
+                and chunks is not None
+            )
+            else "not_ready"
+        ),
+
+        "bm25_ready": (
+            bm25 is not None
+        ),
+
+        "chunks_loaded": (
+            len(chunks)
+            if chunks
+            else 0
+        ),
+
+        "reranker_loaded": reranker_loaded,
+    }
+
+
+# ============================================================
+# DOCUMENTS ENDPOINT
+# ============================================================
+
+@app.get("/v1/documents")
+def documents():
+
+    if chunks is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail="RAG system is not ready.",
+        )
+
+    documents_map = {}
+
+    # --------------------------------------------------------
+    # Extract document information from chunks
+    # --------------------------------------------------------
+
+    for chunk in chunks:
+
+        metadata = {}
+
+        # ----------------------------------------------------
+        # Dictionary chunk
+        # ----------------------------------------------------
+
+        if isinstance(
+            chunk,
+            dict,
+        ):
+
+            metadata = chunk.get(
+                "metadata",
+                {},
+            ) or {}
+
+        # ----------------------------------------------------
+        # Object chunk
+        # ----------------------------------------------------
+
+        elif hasattr(
+            chunk,
+            "metadata",
+        ):
+
+            metadata = (
+                chunk.metadata
+                or {}
+            )
+
+        # ----------------------------------------------------
+        # Metadata
+        # ----------------------------------------------------
+
+        source = metadata.get(
+            "source",
+            "Unknown",
+        )
+
+        page = metadata.get(
+            "page",
+        )
+
+        section = metadata.get(
+            "section",
+        )
+
+        # ----------------------------------------------------
+        # Create document entry
+        # ----------------------------------------------------
+
+        if source not in documents_map:
+
+            documents_map[source] = {
+
+                "source": source,
+
+                "chunk_count": 0,
+
+                "pages": set(),
+
+                "sections": set(),
+            }
+
+        documents_map[source][
+            "chunk_count"
+        ] += 1
+
+        # ----------------------------------------------------
+        # Page
+        # ----------------------------------------------------
+
+        if page is not None:
+
+            documents_map[source][
+                "pages"
+            ].add(
+                page
+            )
+
+        # ----------------------------------------------------
+        # Section
+        # ----------------------------------------------------
+
+        if section:
+
+            documents_map[source][
+                "sections"
+            ].add(
+                section
+            )
+
+    # --------------------------------------------------------
+    # Convert sets to JSON-compatible lists
+    # --------------------------------------------------------
+
+    documents_list = []
+
+    for document in documents_map.values():
+
+        document["pages"] = sorted(
+            document["pages"],
+            key=lambda value: str(value),
+        )
+
+        document["sections"] = sorted(
+            document["sections"],
+            key=lambda value: str(value),
+        )
+
+        documents_list.append(
+            document
+        )
+
+    # --------------------------------------------------------
+    # Sort documents
+    # --------------------------------------------------------
+
+    documents_list.sort(
+        key=lambda item: item["source"]
+    )
+
+    # --------------------------------------------------------
+    # Return
+    # --------------------------------------------------------
+
+    return {
+
+        "count": len(
+            documents_list
+        ),
+
+        "documents": documents_list,
     }
 
 
@@ -525,17 +583,15 @@ def health():
 @app.post(
     "/ask",
     response_model=QuestionResponse,
-    summary="Ask a question",
-    description=(
-        "Ask a question about the indexed documents. "
-        "This endpoint is kept for backwards compatibility."
-    ),
 )
 def ask_question(
     request: QuestionRequest,
 ):
 
-    if bm25 is None or chunks is None:
+    if (
+        bm25 is None
+        or chunks is None
+    ):
 
         raise HTTPException(
             status_code=503,
@@ -553,61 +609,98 @@ def ask_question(
 
     try:
 
-        result = rag_answer(
+        # ----------------------------------------------------
+        # Legacy endpoint
+        # ----------------------------------------------------
+
+        answer = rag_answer(
             question=question,
             bm25=bm25,
             chunks=chunks,
         )
 
-        normalized = _normalize_pipeline_result(
-            result
-        )
+        # ----------------------------------------------------
+        # Return only answer
+        # ----------------------------------------------------
 
         return QuestionResponse(
+
             question=question,
-            answer=normalized["answer"],
+
+            answer=(
+                answer
+                if isinstance(
+                    answer,
+                    str,
+                )
+                else str(answer)
+            ),
         )
 
     except Exception as error:
 
         print(
-            f"RAG error: "
-            f"{type(error).__name__}: {error}"
+            "\n========================================"
+        )
+
+        print(
+            "        LEGACY RAG ERROR"
+        )
+
+        print(
+            "========================================"
+        )
+
+        print(
+            f"Type: {type(error).__name__}"
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+        print(
+            "========================================"
         )
 
         raise HTTPException(
             status_code=500,
             detail=(
-                "An error occurred while processing "
-                "the question."
+                "An error occurred while "
+                "processing the question."
             ),
         )
 
 
 # ============================================================
-# VERSIONED ASK ENDPOINT
+# V1 ASK ENDPOINT
 # ============================================================
 
 @app.post(
     "/v1/ask",
-    response_model=AskResponse,
-    summary="Ask a question with citations and metadata",
-    description=(
-        "Run the hybrid RAG pipeline and return the grounded "
-        "answer together with citations, confidence information, "
-        "and source metadata."
-    ),
+    response_model=V1QuestionResponse,
 )
 def ask_question_v1(
     request: QuestionRequest,
 ):
 
-    if bm25 is None or chunks is None:
+    # --------------------------------------------------------
+    # Check RAG readiness
+    # --------------------------------------------------------
+
+    if (
+        bm25 is None
+        or chunks is None
+    ):
 
         raise HTTPException(
             status_code=503,
             detail="RAG system is not ready.",
         )
+
+    # --------------------------------------------------------
+    # Clean question
+    # --------------------------------------------------------
 
     question = request.question.strip()
 
@@ -620,175 +713,164 @@ def ask_question_v1(
 
     try:
 
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "        V1 RAG REQUEST"
+        )
+
+        print(
+            "========================================"
+        )
+
+        print(
+            f"Question: {question}"
+        )
+
+        # ====================================================
+        # RUN RAG PIPELINE
+        # ====================================================
+
         result = rag_answer(
+
             question=question,
+
             bm25=bm25,
+
             chunks=chunks,
+
+            return_details=True,
         )
 
-        normalized = _normalize_pipeline_result(
-            result
-        )
+        # ====================================================
+        # NORMALIZE RESULT
+        # ====================================================
 
-        citations = _normalize_citations(
-            normalized["citations"]
-        )
+        normalized = normalize_pipeline_result(
 
-        sources = _normalize_sources(
-            normalized["sources"]
-        )
+            result=result,
 
-        confidence = normalized["confidence"]
-
-        # --------------------------------------------
-        # Validate confidence if supplied
-        # --------------------------------------------
-
-        if confidence is not None:
-
-            try:
-
-                confidence = float(confidence)
-
-                # Keep confidence inside 0-1.
-                confidence = max(
-                    0.0,
-                    min(1.0, confidence),
-                )
-
-            except (
-                TypeError,
-                ValueError,
-            ):
-
-                confidence = None
-
-        return AskResponse(
             question=question,
-            answer=normalized["answer"],
-            citations=citations,
-            confidence=confidence,
-            sources=sources,
         )
+
+        # ====================================================
+        # LOG RESULT
+        # ====================================================
+
+        print(
+            "\nV1 RAG RESULT:"
+        )
+
+        print(
+            f"Answer length: "
+            f"{len(normalized['answer'])}"
+        )
+
+        print(
+            f"Citations: "
+            f"{len(normalized['citations'])}"
+        )
+
+        print(
+            f"Sources: "
+            f"{len(normalized['sources'])}"
+        )
+
+        print(
+            f"Retrieved chunks: "
+            f"{normalized['retrieved_chunks']}"
+        )
+
+        print(
+            f"Confidence: "
+            f"{normalized['confidence']}"
+        )
+
+        print(
+            "========================================"
+        )
+
+        # ====================================================
+        # RETURN STRUCTURED RESPONSE
+        # ====================================================
+
+        return V1QuestionResponse(
+
+            question=normalized[
+                "question"
+            ],
+
+            answer=normalized[
+                "answer"
+            ],
+
+            citations=normalized[
+                "citations"
+            ],
+
+            confidence=normalized[
+                "confidence"
+            ],
+
+            sources=normalized[
+                "sources"
+            ],
+
+            citation_verification=normalized[
+                "citation_verification"
+            ],
+
+            retrieved_chunks=normalized[
+                "retrieved_chunks"
+            ],
+        )
+
+    # --------------------------------------------------------
+    # HTTP exception
+    # --------------------------------------------------------
+
+    except HTTPException:
+
+        raise
+
+    # --------------------------------------------------------
+    # Unexpected exception
+    # --------------------------------------------------------
 
     except Exception as error:
 
         print(
-            f"RAG v1 error: "
-            f"{type(error).__name__}: {error}"
+            "\n========================================"
+        )
+
+        print(
+            "        V1 RAG ERROR"
+        )
+
+        print(
+            "========================================"
+        )
+
+        print(
+            f"Type: {type(error).__name__}"
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+        print(
+            "========================================"
         )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
-                "An error occurred while processing "
-                "the question."
+                "An error occurred while "
+                "processing the question."
             ),
         )
-
-
-# ============================================================
-# DOCUMENTS ENDPOINT
-# ============================================================
-
-@app.get(
-    "/v1/documents",
-    summary="List indexed documents",
-    description=(
-        "Return source metadata for documents currently "
-        "loaded into the RAG system."
-    ),
-)
-def list_documents():
-
-    if chunks is None:
-
-        raise HTTPException(
-            status_code=503,
-            detail="RAG system is not ready.",
-        )
-
-    documents = {}
-
-    for chunk in chunks:
-
-        metadata = _extract_chunk_metadata(
-            chunk
-        )
-
-        source = metadata.source
-
-        if not source:
-
-            continue
-
-        if source not in documents:
-
-            documents[source] = {
-                "source": source,
-                "pages": [],
-                "sections": [],
-                "chunk_count": 0,
-            }
-
-        documents[source]["chunk_count"] += 1
-
-        if metadata.page is not None:
-
-            if metadata.page not in documents[
-                source
-            ]["pages"]:
-
-                documents[source]["pages"].append(
-                    metadata.page
-                )
-
-        if metadata.section:
-
-            if metadata.section not in documents[
-                source
-            ]["sections"]:
-
-                documents[source][
-                    "sections"
-                ].append(
-                    metadata.section
-                )
-
-    return {
-        "count": len(documents),
-        "documents": list(
-            documents.values()
-        ),
-    }
-
-
-# ============================================================
-# INDEX STATUS
-# ============================================================
-
-@app.get(
-    "/v1/status",
-    summary="RAG system status",
-)
-def rag_status():
-
-    return {
-        "api_version": "1.1.0",
-        "status": (
-            "ready"
-            if bm25 is not None and chunks is not None
-            else "not_ready"
-        ),
-        "bm25_ready": bm25 is not None,
-        "reranker_loaded": (
-            True
-            if bm25 is not None
-            else False
-        ),
-        "chunks_loaded": (
-            len(chunks)
-            if chunks
-            else 0
-        ),
-    }
