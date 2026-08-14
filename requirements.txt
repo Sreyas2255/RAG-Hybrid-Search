@@ -8,3 +8,5 @@ chromadb
 rank-bm25
 groq
 python-dotenv
+fastapi 
+uvicorn
