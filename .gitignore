@@ -19,6 +19,8 @@ data/chroma/
 data/processed/
 data/chunks/
 
+
+
 # Hugging Face cache
 .cache/
 huggingface/
