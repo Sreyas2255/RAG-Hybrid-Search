@@ -50,7 +50,7 @@ MEDIUM_CONFIDENCE_THRESHOLD = 0.45
 # ------------------------------------------------------------
 
 CITATION_PATTERN = re.compile(
-    r"\[(\d+)\]"
+    r"(?:\[|【)(\d+)(?:\]|】)"
 )
 
 NO_ANSWER = (
@@ -663,8 +663,8 @@ def create_rag_prompt(
     return f"""
 You are a document question-answering assistant.
 
-Your job is to answer the user's question using
-ONLY the supplied document context.
+Your job is to answer the user's question using ONLY
+the supplied document context.
 
 IMPORTANT RULES:
 
@@ -681,11 +681,20 @@ IMPORTANT RULES:
 5. Every factual claim in your answer MUST have
    at least one citation.
 
-6. Citations MUST use the exact format:
+6. Citations MUST use ASCII square brackets only.
 
+   Valid:
    [1]
    [2]
    [3]
+
+   Invalid:
+   【1】
+   【2】
+   (1)
+   (2)
+   <1>
+   <2>
 
 7. A citation number refers ONLY to the matching
    Context number.
@@ -693,30 +702,37 @@ IMPORTANT RULES:
 8. NEVER create a citation number that does not
    exist in the supplied context.
 
-9. If multiple context blocks support a claim,
-   you may use multiple citations, for example:
+9. Only cite a context block when its text directly
+   supports the specific claim you are making.
 
-   [1][3]
+10. Prefer the strongest and most directly relevant
+    context that supports the claim.
 
-10. Prefer the context that directly answers the
-    question.
+11. Do NOT choose a citation merely because the
+    context is generally related to the question.
 
-11. Keep the answer clear and concise.
+12. If several contexts directly support the same
+    claim, you may cite multiple contexts, for example:
+    [1][3]
 
-12. If several context sections support the answer,
-    combine them carefully.
+13. Keep citations attached directly to the claim they
+    support.
 
-13. If the answer is not present in the supplied
+14. Do NOT put citations on a separate line.
+
+15. Do NOT output citation-only lines such as:
+    [1][2]
+
+16. NEVER invent or guess citation numbers.
+
+17. If the answer is not present in the supplied
     context, return exactly:
 
 I could not find the answer in the provided documents.
 
-14. Do not cite a context block merely because it
-    is related. Cite it only when it supports the
-    factual claim.
+18. Do not include a separate bibliography.
 
-15. Do not include a separate bibliography.
-    Inline citations are required.
+19. Keep the answer clear and concise.
 
 DOCUMENT CONTEXT:
 
@@ -740,34 +756,26 @@ def extract_citations(
     """
     Extract citation numbers from generated answer.
 
-    Example:
-
-        "Machine learning learns from data [1]."
-
-    returns:
+    Supports both ASCII and full-width citation
+    brackets:
 
         [1]
+        [1][2]
+        【1】
+        【1】【2】
     """
 
     if not answer:
-
         return []
 
     citations = []
 
-    for match in CITATION_PATTERN.finditer(
-        answer
-    ):
+    for match in CITATION_PATTERN.finditer(answer):
 
-        number = int(
-            match.group(1)
-        )
+        number = int(match.group(1))
 
         if number not in citations:
-
-            citations.append(
-                number
-            )
+            citations.append(number)
 
     return citations
 
@@ -780,45 +788,136 @@ def extract_citation_claims(
     answer
 ):
     """
-    Associate each citation with the sentence
-    containing that citation.
+    Associate each citation with the actual textual claim
+    it supports.
 
-    Example:
+    Handles:
+        Claim text [1].
+        Claim text [1][2].
+        Claim text.
+        [1][2]
+        Claim text.【1】【2】
 
-        "Machine learning learns from data [1]."
-
-    becomes approximately:
-
-        {
-            1: "Machine learning learns from data [1]."
-        }
+    Citation-only lines are attached to the nearest
+    preceding textual claim.
     """
 
     claims = {}
 
     if not answer:
-
         return claims
 
-    sentences = re.split(
-        r"(?<=[.!?])\s+",
-        answer.strip(),
+    text = str(answer).strip()
+
+    if not text:
+        return claims
+
+    warning_markers = [
+        "Citation verification warning:",
+        "Citation verification warnings:",
+    ]
+
+    for marker in warning_markers:
+
+        marker_position = text.find(marker)
+
+        if marker_position != -1:
+            text = text[:marker_position].rstrip()
+
+    if not text:
+        return claims
+
+    # Normalize Unicode full-width citation brackets.
+    text = (
+        text
+        .replace("【", "[")
+        .replace("】", "]")
     )
 
-    for sentence in sentences:
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
-        citations = extract_citations(
-            sentence
+    normalized_blocks = []
+
+    for line in lines:
+
+        citation_only = re.fullmatch(
+            r"(?:\s*\[\d+\]\s*)+",
+            line,
         )
 
-        for citation in citations:
+        if citation_only:
 
-            claims.setdefault(
-                citation,
-                [],
-            ).append(
-                sentence.strip()
+            if normalized_blocks:
+                previous = normalized_blocks[-1]
+                normalized_blocks[-1] = (
+                    f"{previous} {line}"
+                )
+
+            continue
+
+        normalized_blocks.append(line)
+
+    if not normalized_blocks:
+        return claims
+
+    for block in normalized_blocks:
+
+        sentence_parts = re.split(
+            r"(?<=[.!?])\s+(?=[A-Z0-9])",
+            block,
+        )
+
+        for sentence in sentence_parts:
+
+            sentence = sentence.strip()
+
+            if not sentence:
+                continue
+
+            citations = extract_citations(sentence)
+
+            if not citations:
+                continue
+
+            claim = CITATION_PATTERN.sub(
+                "",
+                sentence,
             )
+
+            claim = re.sub(
+                r"\s+([,.!?;:])",
+                r"\1",
+                claim,
+            )
+
+            claim = re.sub(
+                r"\s{2,}",
+                " ",
+                claim,
+            ).strip()
+
+            claim = re.sub(
+                r"^[\-*\u2022]\s*",
+                "",
+                claim,
+            ).strip()
+
+            if not claim:
+                continue
+
+            for citation in citations:
+
+                claims.setdefault(
+                    citation,
+                    [],
+                )
+
+                if claim not in claims[citation]:
+                    claims[citation].append(claim)
 
     return claims
 
@@ -902,7 +1001,7 @@ def verify_citations_with_llm(
     The verifier receives:
         - generated answer
         - cited source chunk
-        - claim containing citation
+        - actual textual claim
 
     It returns a structured verification result.
 
@@ -951,6 +1050,28 @@ def verify_citations_with_llm(
             "",
         )
 
+        if not source_text.strip():
+
+            for claim in claims:
+
+                unsupported.append(
+                    {
+                        "citation": citation,
+                        "claim": claim,
+                        "source": source.get(
+                            "source",
+                            "Unknown",
+                        ),
+                        "page": source.get(
+                            "page",
+                            "Unknown",
+                        ),
+                        "supported": False,
+                    }
+                )
+
+            continue
+
         for claim in claims:
 
             prompt = f"""
@@ -959,6 +1080,8 @@ You are a citation verification judge.
 Determine whether the provided source chunk
 actually supports the claim.
 
+You MUST judge only the supplied source text.
+
 SOURCE CHUNK:
 
 {source_text}
@@ -966,6 +1089,21 @@ SOURCE CHUNK:
 CLAIM:
 
 {claim}
+
+Rules:
+
+1. If the source directly supports the claim,
+   return supported=true.
+
+2. If the source does not provide enough evidence
+   for the claim, return supported=false.
+
+3. Do not use outside knowledge.
+
+4. Do not infer missing facts.
+
+5. Do not judge whether the claim is generally true.
+   Judge only whether THIS SOURCE supports it.
 
 Return ONLY valid JSON in this exact format:
 
@@ -980,9 +1118,6 @@ or:
   "supported": false,
   "reason": "short explanation"
 }}
-
-Do not use outside knowledge.
-Judge only whether the source supports the claim.
 """
 
             try:
@@ -1302,10 +1437,6 @@ def calculate_retrieval_confidence(
         for score in scores
     ]
 
-    # --------------------------------------------------------
-    # Weighted average
-    # --------------------------------------------------------
-
     weights = [
         1.0 / (index + 1)
         for index in range(
@@ -1593,48 +1724,81 @@ def build_sources(
 # HANDLE UNSUPPORTED CITATIONS
 # ============================================================
 
-def remove_invalid_citations(
+def remove_unverified_citations(
     answer,
-    invalid_citations,
+    verification,
 ):
     """
-    Remove citations that reference a context block
-    that does not exist.
+    Remove citation markers that are either invalid or
+    explicitly judged unsupported by the citation verifier.
 
-    Example:
+    Verified citations are retained.
 
-        [99]
-
-    is removed if Context 99 does not exist.
+    Supports both ASCII and full-width citation formats:
+        [1]
+        【1】
     """
 
-    if not invalid_citations:
-
+    if not answer:
         return answer
 
-    invalid_set = {
+    invalid = {
         int(value)
-        for value in invalid_citations
+        for value in verification.get(
+            "invalid",
+            [],
+        )
     }
 
-    def replacement(
-        match
-    ):
-
-        number = int(
-            match.group(1)
+    unsupported = {
+        int(item["citation"])
+        for item in verification.get(
+            "unsupported",
+            [],
         )
+        if isinstance(item, dict)
+        and item.get("citation") is not None
+    }
 
-        if number in invalid_set:
+    remove_set = invalid | unsupported
 
+    if not remove_set:
+        return answer
+
+    def replacement(match):
+        number = int(match.group(1))
+
+        if number in remove_set:
             return ""
 
         return match.group(0)
 
-    return CITATION_PATTERN.sub(
+    cleaned = CITATION_PATTERN.sub(
         replacement,
         answer,
     )
+
+    # Clean up spaces left behind after removing citations.
+    cleaned = re.sub(
+        r"[ \t]{2,}",
+        " ",
+        cleaned,
+    )
+
+    cleaned = re.sub(
+        r"[ \t]+([,.!?;:])",
+        r"\1",
+        cleaned,
+    )
+
+    # Remove empty citation-only lines.
+    cleaned = re.sub(
+        r"(?m)^\s*$\n?",
+        "",
+        cleaned,
+    )
+
+    return cleaned.strip()
 
 
 # ============================================================
@@ -2277,15 +2441,19 @@ def rag_answer(
     )
 
     # ========================================================
-    # STEP 11: REMOVE INVALID CITATIONS
+    # STEP 11: REMOVE UNVERIFIED CITATIONS
     # ========================================================
 
-    answer = remove_invalid_citations(
+    answer = remove_unverified_citations(
         answer,
-        verification.get(
-            "invalid",
-            [],
-        ),
+        verification,
+    )
+
+    # Re-extract citations after removing invalid/unsupported
+    # citations so the API returns only citations that remain
+    # in the final answer.
+    citations = extract_citations(
+        answer
     )
 
     # ========================================================

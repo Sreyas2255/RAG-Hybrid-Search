@@ -1,0 +1,24 @@
+services:
+  rag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rag-hybrid-search-api:latest
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  rag-dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    image: rag-dashboard:latest
+    container_name: rag-dashboard
+    ports:
+      - "8501:8501"
+    depends_on:
+      - rag-api
+    restart: unless-stopped

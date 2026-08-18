@@ -1,4 +1,4 @@
-pypdf
+PyMuPDF
 langchain
 langchain-community 
 langchain-text-splitters
@@ -11,3 +11,4 @@ python-dotenv
 fastapi 
 uvicorn
 streamlit
+requests

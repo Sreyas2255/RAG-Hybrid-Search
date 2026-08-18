@@ -6,7 +6,11 @@ import streamlit as st
 # CONFIGURATION
 # ============================================================
 
-API_URL = "http://127.0.0.1:8000"
+# IMPORTANT:
+# Streamlit will run inside Docker.
+# "rag-api" is the Docker container name and is resolvable
+# through the shared Docker network: rag-network.
+API_URL = "http://rag-api:8000"
 
 ASK_ENDPOINT = f"{API_URL}/v1/ask"
 HEALTH_ENDPOINT = f"{API_URL}/health"
@@ -43,11 +47,7 @@ def safe_get(obj, key, default=None):
     if isinstance(obj, dict):
         return obj.get(key, default)
 
-    return getattr(
-        obj,
-        key,
-        default,
-    )
+    return getattr(obj, key, default)
 
 
 def normalize_citation_id(citation):
@@ -64,22 +64,15 @@ def normalize_citation_id(citation):
         {"citation": "[1]"}
     """
 
-    # --------------------------------------------------------
     # Integer
-    # --------------------------------------------------------
-
     if isinstance(citation, int):
         return citation
 
-    # --------------------------------------------------------
     # String
-    # --------------------------------------------------------
-
     if isinstance(citation, str):
 
         value = citation.strip()
 
-        # "[1]"
         if value.startswith("[") and value.endswith("]"):
             value = value[1:-1].strip()
 
@@ -88,10 +81,7 @@ def normalize_citation_id(citation):
         except ValueError:
             return None
 
-    # --------------------------------------------------------
     # Dictionary / object
-    # --------------------------------------------------------
-
     citation_id = safe_get(
         citation,
         "citation_id",
@@ -109,30 +99,23 @@ def normalize_citation_id(citation):
             "citation",
         )
 
-    return normalize_citation_id(
-        citation_id
-    )
+    return normalize_citation_id(citation_id)
 
 
 def normalize_citations(citations):
     """
     Normalize API citations.
 
-    Your current API can return:
+    Example:
 
         [1, 5, 2]
 
-    or dictionaries.
-
-    Always return:
+    Returns:
 
         [1, 5, 2]
     """
 
-    if not isinstance(
-        citations,
-        list,
-    ):
+    if not isinstance(citations, list):
         return []
 
     normalized = []
@@ -146,10 +129,7 @@ def normalize_citations(citations):
         if citation_id is not None:
 
             if citation_id not in normalized:
-
-                normalized.append(
-                    citation_id
-                )
+                normalized.append(citation_id)
 
     return normalized
 
@@ -161,20 +141,14 @@ def normalize_sources(sources):
     Returns a list of dictionaries.
     """
 
-    if not isinstance(
-        sources,
-        list,
-    ):
+    if not isinstance(sources, list):
         return []
 
     normalized = []
 
     for source in sources:
 
-        if isinstance(
-            source,
-            dict,
-        ):
+        if isinstance(source, dict):
 
             normalized.append(
                 {
@@ -216,9 +190,7 @@ def normalize_sources(sources):
             normalized.append(
                 {
                     "citation": None,
-                    "source": str(
-                        source
-                    ),
+                    "source": str(source),
                     "page": None,
                     "human_page": None,
                     "id": None,
@@ -243,13 +215,9 @@ def citation_number_from_source(source):
         "1"   -> 1
     """
 
-    citation = source.get(
-        "citation"
-    )
+    citation = source.get("citation")
 
-    return normalize_citation_id(
-        citation
-    )
+    return normalize_citation_id(citation)
 
 
 def build_source_map(sources):
@@ -263,17 +231,13 @@ def build_source_map(sources):
 
     for source in sources:
 
-        citation_id = (
-            citation_number_from_source(
-                source
-            )
+        citation_id = citation_number_from_source(
+            source
         )
 
         if citation_id is not None:
 
-            source_map[
-                citation_id
-            ] = source
+            source_map[citation_id] = source
 
     return source_map
 
@@ -287,9 +251,7 @@ def confidence_label(confidence):
         return "N/A"
 
     try:
-        score = float(
-            confidence
-        )
+        score = float(confidence)
     except (
         TypeError,
         ValueError,
@@ -314,9 +276,7 @@ def confidence_percent(confidence):
         return "N/A"
 
     try:
-        value = float(
-            confidence
-        )
+        value = float(confidence)
     except (
         TypeError,
         ValueError,
@@ -335,10 +295,7 @@ def get_error_detail(response):
 
         data = response.json()
 
-        if isinstance(
-            data,
-            dict,
-        ):
+        if isinstance(data, dict):
 
             return data.get(
                 "detail",
@@ -388,9 +345,7 @@ try:
 
     if health_response.status_code == 200:
 
-        health_data = (
-            health_response.json()
-        )
+        health_data = health_response.json()
 
         if health_data.get(
             "bm25_ready",
@@ -417,12 +372,18 @@ try:
             "health response."
         )
 
-except requests.RequestException:
+except requests.RequestException as error:
 
     st.error(
-        "🔴 Could not connect to the FastAPI server. "
-        "Make sure FastAPI is running on "
-        f"{API_URL}."
+        "🔴 Could not connect to the FastAPI server."
+    )
+
+    st.caption(
+        f"Trying to connect to: {API_URL}"
+    )
+
+    st.caption(
+        f"Connection error: {error}"
     )
 
 
@@ -441,9 +402,7 @@ if api_online:
 
         if status_response.status_code == 200:
 
-            status_data = (
-                status_response.json()
-            )
+            status_data = status_response.json()
 
     except requests.RequestException:
 
@@ -592,9 +551,7 @@ if ask_clicked:
                         "📊 Answer Quality"
                     )
 
-                    col1, col2, col3 = st.columns(
-                        3
-                    )
+                    col1, col2, col3 = st.columns(3)
 
                     # -------------------------------------------------
                     # Confidence
@@ -645,9 +602,7 @@ if ask_clicked:
 
                         st.metric(
                             "Citations",
-                            len(
-                                citations
-                            ),
+                            len(citations),
                         )
 
                     # -------------------------------------------------
@@ -658,9 +613,7 @@ if ask_clicked:
 
                         st.metric(
                             "Sources",
-                            len(
-                                sources
-                            ),
+                            len(sources),
                         )
 
                     # =================================================
@@ -693,7 +646,7 @@ if ask_clicked:
                                 )
 
                                 # -----------------------------------------
-                                # We found source metadata
+                                # Source metadata
                                 # -----------------------------------------
 
                                 if source:
@@ -784,9 +737,7 @@ if ask_clicked:
                                         or rrf_score is not None
                                     ):
 
-                                        score_columns = st.columns(
-                                            2
-                                        )
+                                        score_columns = st.columns(2)
 
                                         with score_columns[0]:
 
@@ -1001,23 +952,17 @@ if ask_clicked:
 
                             st.write(
                                 "Verified:",
-                                len(
-                                    verified_items
-                                ),
+                                len(verified_items)
                             )
 
                             st.write(
                                 "Unsupported:",
-                                len(
-                                    unsupported_items
-                                ),
+                                len(unsupported_items)
                             )
 
                             st.write(
                                 "Invalid:",
-                                len(
-                                    invalid_items
-                                ),
+                                len(invalid_items)
                             )
 
                             if verified_items:
@@ -1050,9 +995,7 @@ if ask_clicked:
                                         if claim:
 
                                             st.caption(
-                                                str(
-                                                    claim
-                                                )
+                                                str(claim)
                                             )
 
                                     else:
@@ -1079,8 +1022,7 @@ if ask_clicked:
                                         )
 
                                         st.write(
-                                            f"⚠ "
-                                            f"[{citation_number}]"
+                                            f"⚠ [{citation_number}]"
                                         )
 
                                         claim = item.get(
@@ -1090,9 +1032,7 @@ if ask_clicked:
                                         if claim:
 
                                             st.caption(
-                                                str(
-                                                    claim
-                                                )
+                                                str(claim)
                                             )
 
                                     else:
@@ -1185,9 +1125,7 @@ if ask_clicked:
                         "🔧 Raw API Response"
                     ):
 
-                        st.json(
-                            data
-                        )
+                        st.json(data)
 
                 # =====================================================
                 # BAD REQUEST
@@ -1196,9 +1134,7 @@ if ask_clicked:
                 elif response.status_code == 400:
 
                     st.warning(
-                        get_error_detail(
-                            response
-                        )
+                        get_error_detail(response)
                     )
 
                 # =====================================================
@@ -1208,9 +1144,7 @@ if ask_clicked:
                 elif response.status_code == 503:
 
                     st.error(
-                        get_error_detail(
-                            response
-                        )
+                        get_error_detail(response)
                     )
 
                 # =====================================================
@@ -1232,10 +1166,18 @@ if ask_clicked:
                     "The RAG pipeline may be taking too long."
                 )
 
-            except requests.ConnectionError:
+            except requests.ConnectionError as error:
 
                 st.error(
                     "Could not connect to the FastAPI server."
+                )
+
+                st.caption(
+                    f"API URL: {API_URL}"
+                )
+
+                st.caption(
+                    f"Error: {error}"
                 )
 
             except requests.RequestException as error:
