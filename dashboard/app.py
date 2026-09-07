@@ -26,7 +26,214 @@ st.set_page_config(
     page_title="Hybrid RAG Assistant",
     page_icon="📚",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+
+# ============================================================
+# CUSTOM STYLING (dark, professional theme)
+# ============================================================
+
+def inject_custom_css():
+
+    st.markdown(
+        """
+        <style>
+
+        /* ---------------------------------------------------
+           Fonts + base
+        --------------------------------------------------- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        :root {
+            --accent: #6C5CE7;
+            --accent-soft: rgba(108, 92, 231, 0.15);
+            --accent-glow: rgba(108, 92, 231, 0.35);
+            --surface: #161A23;
+            --surface-2: #1D212C;
+            --border: rgba(255, 255, 255, 0.08);
+            --text-soft: #A6ACC0;
+            --good: #33D9A2;
+            --warn: #F5A623;
+            --bad: #F4586B;
+        }
+
+        .stApp {
+            background:
+                radial-gradient(1200px 500px at 10% -10%, rgba(108,92,231,0.10), transparent 60%),
+                radial-gradient(900px 400px at 100% 0%, rgba(51,217,162,0.06), transparent 55%),
+                #0E1117;
+        }
+
+        /* Hide default Streamlit chrome for a cleaner, product-like feel */
+        #MainMenu, footer { visibility: hidden; }
+        header[data-testid="stHeader"] { background: transparent; }
+
+        /* ---------------------------------------------------
+           Hero header
+        --------------------------------------------------- */
+        .hero-card {
+            padding: 1.6rem 1.9rem;
+            border-radius: 18px;
+            background: linear-gradient(135deg, rgba(108,92,231,0.18), rgba(51,217,162,0.06));
+            border: 1px solid var(--border);
+            margin-bottom: 1.4rem;
+        }
+        .hero-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #B9AFFF;
+            background: var(--accent-soft);
+            padding: 0.25rem 0.7rem;
+            border-radius: 999px;
+            margin-bottom: 0.7rem;
+        }
+        .hero-title {
+            font-size: 2.05rem;
+            font-weight: 800;
+            margin: 0 0 0.35rem 0;
+            background: linear-gradient(90deg, #FFFFFF, #C9C3FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-sub {
+            color: var(--text-soft);
+            font-size: 0.98rem;
+            max-width: 780px;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        /* ---------------------------------------------------
+           Section headers
+        --------------------------------------------------- */
+        h2, h3 {
+            font-weight: 700 !important;
+        }
+
+        /* ---------------------------------------------------
+           Cards / containers with a visible border
+        --------------------------------------------------- */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 16px !important;
+            border: 1px solid var(--border) !important;
+            background: var(--surface) !important;
+        }
+
+        /* ---------------------------------------------------
+           Buttons
+        --------------------------------------------------- */
+        .stButton > button {
+            border-radius: 12px;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            transition: all 0.15s ease;
+        }
+        .stButton > button[kind="primary"] {
+            background: linear-gradient(90deg, #6C5CE7, #8B7BFF);
+            border: none;
+            box-shadow: 0 4px 18px var(--accent-glow);
+        }
+        .stButton > button[kind="primary"]:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 24px var(--accent-glow);
+        }
+
+        /* ---------------------------------------------------
+           Text area / inputs
+        --------------------------------------------------- */
+        .stTextArea textarea {
+            border-radius: 14px !important;
+            background: var(--surface) !important;
+            border: 1px solid var(--border) !important;
+            font-size: 1rem;
+        }
+        .stTextArea textarea:focus {
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 2px var(--accent-glow) !important;
+        }
+
+        /* ---------------------------------------------------
+           Metrics
+        --------------------------------------------------- */
+        div[data-testid="stMetric"] {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.9rem 1rem 0.6rem 1rem;
+        }
+        div[data-testid="stMetricLabel"] {
+            color: var(--text-soft) !important;
+        }
+
+        /* ---------------------------------------------------
+           Expanders
+        --------------------------------------------------- */
+        details {
+            background: var(--surface-2) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 12px !important;
+        }
+
+        /* ---------------------------------------------------
+           Badges (used for verified / unsupported / status)
+        --------------------------------------------------- */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+        }
+        .badge-good  { color: var(--good);  background: rgba(51,217,162,0.12); }
+        .badge-warn  { color: var(--warn);  background: rgba(245,166,35,0.12); }
+        .badge-bad   { color: var(--bad);   background: rgba(244,88,107,0.12); }
+        .badge-muted { color: var(--text-soft); background: rgba(255,255,255,0.05); }
+
+        /* ---------------------------------------------------
+           Sidebar
+        --------------------------------------------------- */
+        section[data-testid="stSidebar"] {
+            background: #0B0D13;
+            border-right: 1px solid var(--border);
+        }
+
+        /* Code blocks / mono */
+        code, .stCode, .stCaption {
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def badge(text, kind="muted"):
+    """
+    Render a small pill-shaped status badge.
+    kind: "good" | "warn" | "bad" | "muted"
+    """
+
+    st.markdown(
+        f'<span class="badge badge-{kind}">{text}</span>',
+        unsafe_allow_html=True,
+    )
+
+
+inject_custom_css()
 
 
 # ============================================================
@@ -316,14 +523,20 @@ def get_error_detail(response):
 # TITLE
 # ============================================================
 
-st.title(
-    "📚 Hybrid RAG Assistant"
-)
-
-st.write(
-    "Ask questions using hybrid retrieval over the indexed PDFs. "
-    "When the answer is not found in the documents, the assistant "
-    "falls back to general LLM knowledge and labels it clearly."
+st.markdown(
+    """
+    <div class="hero-card">
+        <div class="hero-eyebrow">📚 Hybrid Retrieval &nbsp;•&nbsp; Dense + BM25 + Rerank</div>
+        <p class="hero-title">Hi, what can I help you find?</p>
+        <p class="hero-sub">
+            Ask me anything about your indexed documents. I'll search dense embeddings
+            and BM25 together, rerank the best matches, and answer with citations you
+            can trust. If it's not in your documents, I'll say so and answer from
+            general knowledge instead — clearly labeled either way.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -356,27 +569,27 @@ try:
             api_online = True
 
             st.success(
-                "🟢 RAG API is online and ready."
+                "🟢 All set — I'm online and ready for your questions."
             )
 
         else:
 
             st.warning(
-                "🟡 RAG API is running but "
-                "the RAG system is not ready."
+                "🟡 I'm up, but still finishing my setup — "
+                "give it a moment and try again."
             )
 
     else:
 
         st.warning(
-            "RAG API returned an unexpected "
-            "health response."
+            "Hmm, I got a response I wasn't expecting from the API. "
+            "You may want to check the backend logs."
         )
 
 except requests.RequestException as error:
 
     st.error(
-        "🔴 Could not connect to the FastAPI server."
+        "🔴 I can't reach the backend right now."
     )
 
     st.caption(
@@ -414,28 +627,29 @@ if api_online:
 # QUESTION SECTION
 # ============================================================
 
-st.subheader(
-    "Ask a question"
-)
+with st.container(border=True):
 
-question = st.text_area(
-    "Enter your question:",
-    placeholder=(
-        "Example: What is deep learning?"
-    ),
-    height=120,
-)
+    st.markdown("#### 💬 Ask a question")
 
+    question = st.text_area(
+        "Enter your question:",
+        placeholder=(
+            "e.g. What is deep learning, and how does it differ from "
+            "classical machine learning?"
+        ),
+        height=120,
+        label_visibility="collapsed",
+    )
 
-# ============================================================
-# ASK BUTTON
-# ============================================================
+    # --------------------------------------------------------
+    # ASK BUTTON
+    # --------------------------------------------------------
 
-ask_clicked = st.button(
-    "🔎 Ask Question",
-    type="primary",
-    use_container_width=True,
-)
+    ask_clicked = st.button(
+        "🔎  Ask",
+        type="primary",
+        use_container_width=True,
+    )
 
 
 # ============================================================
@@ -447,19 +661,19 @@ if ask_clicked:
     if not question.strip():
 
         st.warning(
-            "Please enter a question."
+            "Type a question first — I'm ready when you are 🙂"
         )
 
     elif not api_online:
 
         st.error(
-            "The RAG API is not ready."
+            "I'm not ready to answer yet — the backend isn't online."
         )
 
     else:
 
         with st.spinner(
-            "Searching documents and generating answer..."
+            "Reading through your documents and thinking it over..."
         ):
 
             try:
@@ -546,42 +760,41 @@ if ask_clicked:
                     # ANSWER
                     # =================================================
 
-                    st.divider()
+                    st.markdown("<br>", unsafe_allow_html=True)
 
-                    st.subheader(
-                        "💡 Answer"
-                    )
+                    with st.container(border=True):
 
-                    if (
-                        grounded
-                        and answer_source == "documents"
-                    ):
+                        st.markdown("#### 💡 Here's what I found")
 
-                        st.success(
-                            "📚 Document-grounded answer — "
-                            "supported by the indexed documents."
+                        if (
+                            grounded
+                            and answer_source == "documents"
+                        ):
+
+                            badge(
+                                "📚 Grounded in your documents",
+                                "good",
+                            )
+
+                        else:
+
+                            badge(
+                                "🌐 General knowledge — not from your documents",
+                                "warn",
+                            )
+
+                        st.write("")
+
+                        st.write(
+                            answer
                         )
-
-                    else:
-
-                        st.info(
-                            "🌐 General knowledge answer — "
-                            "the answer was not found in the indexed "
-                            "documents. No document citation is being "
-                            "claimed for this answer."
-                        )
-
-                    st.write(
-                        answer
-                    )
 
                     # =================================================
                     # ANSWER QUALITY
                     # =================================================
 
-                    st.subheader(
-                        "📊 Answer Quality"
-                    )
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("#### 📊 How confident should you be?")
 
                     col1, col2, col3, col4 = st.columns(4)
 
@@ -604,27 +817,19 @@ if ask_clicked:
 
                         if label == "High":
 
-                            st.success(
-                                f"⬆ {label}"
-                            )
+                            badge("⬆ High", "good")
 
                         elif label == "Medium":
 
-                            st.warning(
-                                f"→ {label}"
-                            )
+                            badge("→ Medium", "warn")
 
                         elif label == "Low":
 
-                            st.error(
-                                f"⬇ {label}"
-                            )
+                            badge("⬇ Low", "bad")
 
                         else:
 
-                            st.info(
-                                "N/A"
-                            )
+                            badge("N/A", "muted")
 
                     # -------------------------------------------------
                     # Citations
@@ -673,15 +878,14 @@ if ask_clicked:
                         and answer_source == "documents"
                     ):
 
-                        st.subheader(
-                            "📚 Citations"
-                        )
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown("#### 📚 Citations")
 
                         if not citations:
 
                             st.info(
                                 "No structured citation metadata "
-                                "was returned by the API."
+                                "came back with this answer."
                             )
 
                         else:
@@ -692,10 +896,10 @@ if ask_clicked:
                                     citation_id
                                 )
 
-                                with st.container():
+                                with st.container(border=True):
 
                                     st.markdown(
-                                        f"### Citation [{citation_id}]"
+                                        f"**Citation [{citation_id}]**"
                                     )
 
                                     # -----------------------------------------
@@ -757,21 +961,15 @@ if ask_clicked:
 
                                         if verified:
 
-                                            st.success(
-                                                "✓ Citation verified"
-                                            )
+                                            badge("✓ Verified", "good")
 
                                         elif unsupported:
 
-                                            st.error(
-                                                "✗ Citation unsupported"
-                                            )
+                                            badge("✗ Unsupported", "bad")
 
                                         else:
 
-                                            st.info(
-                                                "Citation metadata available"
-                                            )
+                                            badge("Metadata available", "muted")
 
                                         # -------------------------------------
                                         # Scores
@@ -834,7 +1032,7 @@ if ask_clicked:
                                             "source metadata was returned."
                                         )
 
-                                    st.divider()
+                                st.write("")
                     if (
                         grounded
                         and answer_source == "documents"
@@ -844,15 +1042,14 @@ if ask_clicked:
                         # RETRIEVED SOURCES
                         # =================================================
 
-                        st.subheader(
-                            "📄 Retrieved Sources"
-                        )
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown("#### 📄 Retrieved sources")
 
                         if not sources:
 
                             st.info(
                                 "No retrieved source metadata "
-                                "was returned by the API."
+                                "came back with this answer."
                             )
 
                         else:
@@ -966,15 +1163,11 @@ if ask_clicked:
 
                                     if verified:
 
-                                        st.success(
-                                            "✓ Verified citation"
-                                        )
+                                        badge("✓ Verified citation", "good")
 
                                     elif unsupported:
 
-                                        st.error(
-                                            "✗ Unsupported citation"
-                                        )
+                                        badge("✗ Unsupported citation", "bad")
                     if (
                         grounded
                         and answer_source == "documents"
@@ -1225,14 +1418,14 @@ if ask_clicked:
             except requests.Timeout:
 
                 st.error(
-                    "The request timed out. "
-                    "The RAG pipeline may be taking too long."
+                    "⏱️ That took too long and timed out. "
+                    "The pipeline might be under heavy load — try again in a moment."
                 )
 
             except requests.ConnectionError as error:
 
                 st.error(
-                    "Could not connect to the FastAPI server."
+                    "🔌 I couldn't reach the backend server."
                 )
 
                 st.caption(
@@ -1246,13 +1439,13 @@ if ask_clicked:
             except requests.RequestException as error:
 
                 st.error(
-                    f"Request failed: {error}"
+                    f"Something went wrong with that request: {error}"
                 )
 
             except Exception as error:
 
                 st.error(
-                    f"Streamlit error: "
+                    f"An unexpected error occurred: "
                     f"{type(error).__name__}: {error}"
                 )
 
@@ -1263,135 +1456,92 @@ if ask_clicked:
 
 with st.sidebar:
 
-    st.header(
-        "⚙️ System"
-    )
-
-    # --------------------------------------------------------
-    # FastAPI
-    # --------------------------------------------------------
-
-    st.write(
-        "**FastAPI:**"
-    )
-
-    st.code(
-        API_URL
-    )
-
-    # --------------------------------------------------------
-    # Ask endpoint
-    # --------------------------------------------------------
-
-    st.write(
-        "**Ask endpoint:**"
-    )
-
-    st.code(
-        "/v1/ask"
-    )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # Pipeline
-    # --------------------------------------------------------
-
-    st.write(
-        "**Hybrid retrieval pipeline:**"
-    )
-
-    st.write(
-        "Dense Retrieval → BM25 → RRF → "
-        "Cross-Encoder → Groq"
-    )
-
-    st.divider()
+    st.markdown("### ⚙️ System")
 
     # --------------------------------------------------------
     # System status
     # --------------------------------------------------------
 
-    st.write(
-        "**System status**"
-    )
-
     if api_online:
 
-        st.success(
-            "🟢 RAG Ready"
-        )
+        badge("🟢 Ready to answer", "good")
 
     else:
 
-        st.error(
-            "🔴 RAG Offline"
-        )
+        badge("🔴 Offline", "bad")
 
-    # --------------------------------------------------------
-    # Indexed chunks
-    # --------------------------------------------------------
+    st.write("")
 
-    chunks_loaded = health_data.get(
-        "chunks_loaded",
-        status_data.get(
+    with st.container(border=True):
+
+        # ----------------------------------------------------
+        # Indexed chunks
+        # ----------------------------------------------------
+
+        chunks_loaded = health_data.get(
             "chunks_loaded",
-            0,
-        ),
-    )
+            status_data.get(
+                "chunks_loaded",
+                0,
+            ),
+        )
 
-    st.write(
-        "**Indexed Chunks**"
-    )
+        st.metric(
+            "Indexed chunks",
+            chunks_loaded,
+        )
 
-    st.metric(
-        "Chunks",
-        chunks_loaded,
-    )
+        # ----------------------------------------------------
+        # BM25 / Reranker
+        # ----------------------------------------------------
 
-    # --------------------------------------------------------
-    # BM25
-    # --------------------------------------------------------
-
-    bm25_ready = health_data.get(
-        "bm25_ready",
-        status_data.get(
+        bm25_ready = health_data.get(
             "bm25_ready",
+            status_data.get(
+                "bm25_ready",
+                False,
+            ),
+        )
+
+        reranker_loaded = status_data.get(
+            "reranker_loaded",
             False,
-        ),
-    )
-
-    if bm25_ready:
-
-        st.write(
-            "BM25: 🟩 Ready"
         )
 
-    else:
+        status_col1, status_col2 = st.columns(2)
 
+        with status_col1:
+
+            st.caption("BM25")
+
+            if bm25_ready:
+                badge("Ready", "good")
+            else:
+                badge("Not ready", "bad")
+
+        with status_col2:
+
+            st.caption("Reranker")
+
+            if reranker_loaded:
+                badge("Loaded", "good")
+            else:
+                badge("Not loaded", "bad")
+
+    st.write("")
+
+    with st.expander("🔧 Connection details"):
+
+        st.caption("FastAPI base URL")
+        st.code(API_URL)
+
+        st.caption("Ask endpoint")
+        st.code("/v1/ask")
+
+        st.caption("Pipeline")
         st.write(
-            "BM25: 🟥 Not Ready"
-        )
-
-    # --------------------------------------------------------
-    # Reranker
-    # --------------------------------------------------------
-
-    reranker_loaded = status_data.get(
-        "reranker_loaded",
-        False,
-    )
-
-    if reranker_loaded:
-
-        st.write(
-            "Reranker: 🟩 Loaded"
-        )
-
-    else:
-
-        st.write(
-            "Reranker: 🟥 Not Loaded"
+            "Dense Retrieval → BM25 → RRF → "
+            "Cross-Encoder → Groq"
         )
 
     st.divider()
@@ -1400,9 +1550,7 @@ with st.sidebar:
     # Indexed documents
     # --------------------------------------------------------
 
-    st.write(
-        "**Indexed Documents**"
-    )
+    st.markdown("**📁 Indexed documents**")
 
     if api_online:
 
