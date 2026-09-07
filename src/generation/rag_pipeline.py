@@ -991,6 +991,23 @@ def build_citation_map(
 # LLM CITATION VERIFICATION
 # ============================================================
 
+def _citation_overlap_ratio(claim, source_text):
+    """
+    Calculate meaningful token overlap between a claim and its source.
+
+    The score is based on normalized content words rather than raw
+    character overlap, making it robust to punctuation and formatting.
+    """
+    claim_words = _normalize_words(claim)
+    source_words = _normalize_words(source_text)
+
+    if not claim_words or not source_words:
+        return 0.0
+
+    overlap = claim_words & source_words
+    return len(overlap) / len(claim_words)
+
+
 def verify_citations_with_llm(
     answer,
     citation_map,
@@ -998,25 +1015,21 @@ def verify_citations_with_llm(
     """
     Verify generated citation/claim pairs.
 
-    The verifier receives:
-        - generated answer
-        - cited source chunk
-        - actual textual claim
+    Strategy:
+        1. Check citation validity.
+        2. Perform deterministic textual evidence matching first.
+        3. Mark strong textual matches as verified.
+        4. Use the LLM verifier only for borderline cases.
+        5. Do not allow an LLM failure to turn strong textual
+           evidence into an unsupported citation.
 
-    It returns a structured verification result.
-
-    If the LLM judge cannot be parsed, we fall back
-    to deterministic text-overlap verification.
+    This makes citation verification considerably more stable while
+    retaining an LLM judge for ambiguous claims.
     """
 
-    citation_claims = (
-        extract_citation_claims(
-            answer
-        )
-    )
+    citation_claims = extract_citation_claims(answer)
 
     if not citation_claims:
-
         return {
             "verified": [],
             "unsupported": [],
@@ -1024,95 +1037,110 @@ def verify_citations_with_llm(
         }
 
     verified = []
-
     unsupported = []
-
     invalid = []
 
-    for citation, claims in (
-        citation_claims.items()
-    ):
+    # Strong evidence: deterministic support is sufficient.
+    STRONG_OVERLAP = 0.28
+
+    # Borderline evidence: ask the LLM judge.
+    BORDERLINE_OVERLAP = 0.12
+
+    for citation, claims in citation_claims.items():
 
         if citation not in citation_map:
-
-            invalid.append(
-                citation
-            )
-
+            invalid.append(citation)
             continue
 
-        source = citation_map[
-            citation
-        ]
-
-        source_text = source.get(
-            "text",
-            "",
-        )
+        source = citation_map[citation]
+        source_text = source.get("text", "")
 
         if not source_text.strip():
-
             for claim in claims:
-
                 unsupported.append(
                     {
                         "citation": citation,
                         "claim": claim,
-                        "source": source.get(
-                            "source",
-                            "Unknown",
-                        ),
-                        "page": source.get(
-                            "page",
-                            "Unknown",
-                        ),
+                        "source": source.get("source", "Unknown"),
+                        "page": source.get("page", "Unknown"),
                         "supported": False,
+                        "verification_method": "empty_source",
                     }
                 )
-
             continue
 
         for claim in claims:
+            overlap_ratio = _citation_overlap_ratio(
+                claim,
+                source_text,
+            )
 
+            item = {
+                "citation": citation,
+                "claim": claim,
+                "source": source.get("source", "Unknown"),
+                "page": source.get("page", "Unknown"),
+                "supported": False,
+                "verification_method": None,
+                "overlap_ratio": round(overlap_ratio, 4),
+            }
+
+            # ------------------------------------------------------
+            # Strong deterministic evidence
+            # ------------------------------------------------------
+            if overlap_ratio >= STRONG_OVERLAP:
+                item["supported"] = True
+                item["verification_method"] = "deterministic"
+                item["reason"] = (
+                    "The claim has strong meaningful-token overlap "
+                    "with the cited source."
+                )
+                verified.append(item)
+                continue
+
+            # ------------------------------------------------------
+            # Clearly weak evidence
+            # ------------------------------------------------------
+            if overlap_ratio < BORDERLINE_OVERLAP:
+                item["verification_method"] = "deterministic"
+                item["reason"] = (
+                    "The claim has insufficient meaningful-token "
+                    "overlap with the cited source."
+                )
+                unsupported.append(item)
+                continue
+
+            # ------------------------------------------------------
+            # Borderline evidence: use LLM judge
+            # ------------------------------------------------------
             prompt = f"""
 You are a citation verification judge.
 
-Determine whether the provided source chunk
-actually supports the claim.
+Determine whether the provided source chunk directly supports
+the provided claim.
 
-You MUST judge only the supplied source text.
+Use ONLY the source chunk.
 
 SOURCE CHUNK:
-
 {source_text}
 
 CLAIM:
-
 {claim}
 
 Rules:
-
-1. If the source directly supports the claim,
-   return supported=true.
-
-2. If the source does not provide enough evidence
-   for the claim, return supported=false.
-
-3. Do not use outside knowledge.
-
-4. Do not infer missing facts.
-
-5. Do not judge whether the claim is generally true.
-   Judge only whether THIS SOURCE supports it.
-
-Return ONLY valid JSON in this exact format:
+1. Return supported=true only when the source directly provides
+   enough evidence for the claim.
+2. Do not use outside knowledge.
+3. Do not infer facts that are absent from the source.
+4. The source does not need to use exactly the same wording.
+5. Return ONLY valid JSON.
 
 {{
   "supported": true,
   "reason": "short explanation"
 }}
 
-or:
+or
 
 {{
   "supported": false,
@@ -1121,56 +1149,36 @@ or:
 """
 
             try:
-
-                raw = generate_answer(
-                    prompt
-                )
-
-                parsed = _parse_json_object(
-                    raw
-                )
-
+                raw = generate_answer(prompt)
+                parsed = _parse_json_object(raw)
                 supported = bool(
-                    parsed.get(
-                        "supported",
-                        False,
-                    )
+                    parsed.get("supported", False)
                 )
+
+                item["supported"] = supported
+                item["verification_method"] = "llm"
+                item["reason"] = str(
+                    parsed.get("reason", "")
+                ).strip()
 
             except Exception:
-
-                supported = (
-                    _deterministic_claim_support(
-                        claim,
-                        source_text,
-                    )
+                # Conservative fallback for borderline claims.
+                supported = _deterministic_claim_support(
+                    claim,
+                    source_text,
                 )
 
-            item = {
-                "citation": citation,
-                "claim": claim,
-                "source": source.get(
-                    "source",
-                    "Unknown",
-                ),
-                "page": source.get(
-                    "page",
-                    "Unknown",
-                ),
-                "supported": supported,
-            }
-
-            if supported:
-
-                verified.append(
-                    item
+                item["supported"] = supported
+                item["verification_method"] = "deterministic_fallback"
+                item["reason"] = (
+                    "LLM verification failed; deterministic "
+                    "textual support check was used."
                 )
 
+            if item["supported"]:
+                verified.append(item)
             else:
-
-                unsupported.append(
-                    item
-                )
+                unsupported.append(item)
 
     return {
         "verified": verified,
@@ -1352,7 +1360,7 @@ def _deterministic_claim_support(
         / len(claim_words)
     )
 
-    return ratio >= 0.35
+    return ratio >= 0.28
 
 
 # ============================================================
@@ -1482,49 +1490,33 @@ def calculate_citation_coverage(
     verification,
 ):
     """
-    Calculate citation coverage.
+    Calculate citation coverage using only citations that remain
+    in the final user-facing answer.
 
-    Coverage is based on cited claims that were
-    actually verified.
-
-    Invalid and unsupported citations do not count.
+    Unsupported/invalid citations removed during cleanup do not
+    continue to penalize the final confidence score.
     """
+    final_citations = set(extract_citations(answer))
 
-    claims = (
-        extract_citation_claims(
-            answer
-        )
-    )
-
-    total_claims = sum(
-        len(value)
-        for value in claims.values()
-    )
-
-    if total_claims == 0:
-
+    if not final_citations:
         return 0.0
 
-    verified_count = len(
-        verification.get(
-            "verified",
-            [],
-        )
-    )
+    verified_citations = {
+        item["citation"]
+        for item in verification.get("verified", [])
+        if isinstance(item, dict)
+        and item.get("citation") is not None
+    }
+
+    verified_remaining = final_citations & verified_citations
 
     coverage = (
-        verified_count
-        / total_claims
+        len(verified_remaining)
+        / len(final_citations)
     )
 
     return round(
-        max(
-            0.0,
-            min(
-                1.0,
-                coverage,
-            ),
-        ),
+        max(0.0, min(1.0, coverage)),
         4,
     )
 
@@ -1594,30 +1586,18 @@ def calculate_confidence_score(
 
     Weighting:
 
-        Retrieval confidence: 40%
-        Citation coverage:    40%
-        Completeness:          20%
+        Retrieval confidence: 50%
+        Citation coverage:    30%
+        Completeness:         20%
     """
-
     score = (
-        0.40
-        * retrieval_confidence
-        +
-        0.40
-        * citation_coverage
-        +
-        0.20
-        * answer_completeness
+        0.50 * retrieval_confidence
+        + 0.30 * citation_coverage
+        + 0.20 * answer_completeness
     )
 
     return round(
-        max(
-            0.0,
-            min(
-                1.0,
-                score,
-            ),
-        ),
+        max(0.0, min(1.0, score)),
         4,
     )
 
@@ -1810,65 +1790,13 @@ def append_verification_warning(
     verification,
 ):
     """
-    Append a transparent warning when generated
-    citations are unsupported.
+    Keep the user-facing answer clean.
 
-    We do not silently pretend unsupported citations
-    are valid.
+    Unsupported/invalid citation markers are removed by
+    remove_unverified_citations(), while verification diagnostics
+    remain available in the structured response.
     """
-
-    unsupported = verification.get(
-        "unsupported",
-        [],
-    )
-
-    invalid = verification.get(
-        "invalid",
-        [],
-    )
-
-    if not unsupported and not invalid:
-
-        return answer
-
-    lines = [
-        answer.rstrip(),
-        "",
-        "Citation verification warning:",
-    ]
-
-    if unsupported:
-
-        numbers = sorted(
-            {
-                item["citation"]
-                for item in unsupported
-            }
-        )
-
-        lines.append(
-            "Unsupported citations: "
-            + ", ".join(
-                f"[{number}]"
-                for number in numbers
-            )
-        )
-
-    if invalid:
-
-        lines.append(
-            "Invalid citations: "
-            + ", ".join(
-                f"[{number}]"
-                for number in sorted(
-                    invalid
-                )
-            )
-        )
-
-    return "\n".join(
-        lines
-    )
+    return answer
 
 
 # ============================================================
@@ -1949,6 +1877,84 @@ def build_result_details(
         "retrieved_chunks": len(
             reranked_results
         ),
+        "grounded": True,
+        "answer_source": "documents",
+    }
+
+
+# ============================================================
+# GENERAL KNOWLEDGE FALLBACK
+# ============================================================
+
+def generate_general_knowledge_answer(question):
+    """
+    Answer the question using the LLM's general knowledge when
+    the indexed documents do not provide sufficiently strong
+    evidence. No document citations are requested or returned.
+    """
+
+    prompt = f"""
+You are a helpful AI assistant.
+
+The user's question could not be answered reliably from the
+indexed documents. Answer the question using your general
+knowledge.
+
+Important rules:
+- Give the best accurate answer you can.
+- Do not claim that the answer came from the provided documents.
+- Do not invent or include document citations such as [1] or [2].
+- Be clear and concise.
+
+Question:
+{question}
+
+Answer:
+"""
+
+    try:
+        answer = generate_answer(prompt)
+    except Exception as error:
+        print(
+            "General knowledge fallback failed:",
+            error,
+        )
+        return "I was unable to generate an answer."
+
+    if not answer:
+        return "I was unable to generate an answer."
+
+    return str(answer).strip()
+
+
+def build_general_knowledge_result(
+    question,
+    answer,
+    retrieved_chunks=0,
+):
+    """Build a structured result for a non-document-grounded answer."""
+
+    return {
+        "question": question,
+        "answer": answer,
+        "confidence": None,
+        "confidence_label": "not_applicable",
+        "retrieval_confidence": 0.0,
+        "citation_coverage": 0.0,
+        "answer_completeness": calculate_answer_completeness(
+            question,
+            answer,
+        ),
+        "citations": [],
+        "sources": [],
+        "citation_verification": {
+            "verified": [],
+            "unsupported": [],
+            "invalid": [],
+        },
+        "retrieved_chunks": retrieved_chunks,
+        "grounded": False,
+        "answer_source": "general_knowledge",
     }
 
 
@@ -2011,6 +2017,8 @@ def rag_answer(
         sources
         citation_verification
         retrieved_chunks
+        grounded
+        answer_source
     """
 
     # ========================================================
@@ -2072,19 +2080,16 @@ def rag_answer(
 
     if not hybrid_results:
 
-        answer = NO_ANSWER
+        answer = generate_general_knowledge_answer(
+            question
+        )
 
         if return_details:
 
-            return build_result_details(
+            return build_general_knowledge_result(
                 question=question,
                 answer=answer,
-                reranked_results=[],
-                verification={
-                    "verified": [],
-                    "unsupported": [],
-                    "invalid": [],
-                },
+                retrieved_chunks=0,
             )
 
         return answer
@@ -2118,19 +2123,16 @@ def rag_answer(
 
     if not reranked_results:
 
-        answer = NO_ANSWER
+        answer = generate_general_knowledge_answer(
+            question
+        )
 
         if return_details:
 
-            return build_result_details(
+            return build_general_knowledge_result(
                 question=question,
                 answer=answer,
-                reranked_results=[],
-                verification={
-                    "verified": [],
-                    "unsupported": [],
-                    "invalid": [],
-                },
+                retrieved_chunks=0,
             )
 
         return answer
@@ -2176,25 +2178,21 @@ def rag_answer(
         )
 
         print(
-            "Skipping generation."
+            "Using general knowledge fallback."
         )
 
-        answer = (
-            "I could not find the answer "
-            "in the provided documents."
+        answer = generate_general_knowledge_answer(
+            question
         )
 
         if return_details:
 
-            return build_result_details(
+            return build_general_knowledge_result(
                 question=question,
                 answer=answer,
-                reranked_results=reranked_results,
-                verification={
-                    "verified": [],
-                    "unsupported": [],
-                    "invalid": [],
-                },
+                retrieved_chunks=len(
+                    reranked_results
+                ),
             )
 
         return answer
@@ -2288,19 +2286,18 @@ def rag_answer(
 
     if not context.strip():
 
-        answer = NO_ANSWER
+        answer = generate_general_knowledge_answer(
+            question
+        )
 
         if return_details:
 
-            return build_result_details(
+            return build_general_knowledge_result(
                 question=question,
                 answer=answer,
-                reranked_results=reranked_results,
-                verification={
-                    "verified": [],
-                    "unsupported": [],
-                    "invalid": [],
-                },
+                retrieved_chunks=len(
+                    reranked_results
+                ),
             )
 
         return answer
@@ -2439,6 +2436,20 @@ def rag_answer(
             )
         ),
     )
+
+    for item in verification.get("verified", []):
+        print(
+            f"  VERIFIED [{item['citation']}] "
+            f"method={item.get('verification_method')} "
+            f"overlap={item.get('overlap_ratio', 0):.4f}"
+        )
+
+    for item in verification.get("unsupported", []):
+        print(
+            f"  UNSUPPORTED [{item['citation']}] "
+            f"method={item.get('verification_method')} "
+            f"overlap={item.get('overlap_ratio', 0):.4f}"
+        )
 
     # ========================================================
     # STEP 11: REMOVE UNVERIFIED CITATIONS

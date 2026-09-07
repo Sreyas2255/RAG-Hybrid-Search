@@ -121,6 +121,10 @@ class V1QuestionResponse(BaseModel):
 
     confidence: float | None = None
 
+    grounded: bool = True
+
+    answer_source: str = "documents"
+
     sources: list[Any] = Field(
         default_factory=list
     )
@@ -294,6 +298,20 @@ def normalize_pipeline_result(
                 "confidence",
             ),
 
+            "grounded": bool(
+                result.get(
+                    "grounded",
+                    True,
+                )
+            ),
+
+            "answer_source": str(
+                result.get(
+                    "answer_source",
+                    "documents",
+                )
+            ),
+
             "sources": sources,
 
             "citation_verification": result.get(
@@ -315,6 +333,10 @@ def normalize_pipeline_result(
         "citations": [],
 
         "confidence": None,
+
+        "grounded": True,
+
+        "answer_source": "documents",
 
         "sources": [],
 
@@ -789,6 +811,16 @@ def ask_question_v1(
         )
 
         print(
+            f"Grounded: "
+            f"{normalized['grounded']}"
+        )
+
+        print(
+            f"Answer source: "
+            f"{normalized['answer_source']}"
+        )
+
+        print(
             "========================================"
         )
 
@@ -812,6 +844,14 @@ def ask_question_v1(
 
             confidence=normalized[
                 "confidence"
+            ],
+
+            grounded=normalized[
+                "grounded"
+            ],
+
+            answer_source=normalized[
+                "answer_source"
             ],
 
             sources=normalized[

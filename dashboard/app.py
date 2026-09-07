@@ -321,8 +321,9 @@ st.title(
 )
 
 st.write(
-    "Ask questions about the documents indexed by the "
-    "Hybrid Retrieval-Augmented Generation system."
+    "Ask questions using hybrid retrieval over the indexed PDFs. "
+    "When the answer is not found in the documents, the assistant "
+    "falls back to general LLM knowledge and labels it clearly."
 )
 
 
@@ -504,6 +505,18 @@ if ask_clicked:
                         )
                     )
 
+                    grounded = bool(
+                        data.get(
+                            "grounded",
+                            True,
+                        )
+                    )
+
+                    answer_source = data.get(
+                        "answer_source",
+                        "documents",
+                    )
+
                     sources = normalize_sources(
                         data.get(
                             "sources",
@@ -539,6 +552,25 @@ if ask_clicked:
                         "💡 Answer"
                     )
 
+                    if (
+                        grounded
+                        and answer_source == "documents"
+                    ):
+
+                        st.success(
+                            "📚 Document-grounded answer — "
+                            "supported by the indexed documents."
+                        )
+
+                    else:
+
+                        st.info(
+                            "🌐 General knowledge answer — "
+                            "the answer was not found in the indexed "
+                            "documents. No document citation is being "
+                            "claimed for this answer."
+                        )
+
                     st.write(
                         answer
                     )
@@ -551,7 +583,7 @@ if ask_clicked:
                         "📊 Answer Quality"
                     )
 
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
 
                     # -------------------------------------------------
                     # Confidence
@@ -616,63 +648,269 @@ if ask_clicked:
                             len(sources),
                         )
 
+                    # -------------------------------------------------
+                    # Answer source
+                    # -------------------------------------------------
+
+                    with col4:
+
+                        st.metric(
+                            "Source type",
+                            (
+                                "Documents"
+                                if grounded
+                                and answer_source == "documents"
+                                else "General knowledge"
+                            ),
+                        )
+
                     # =================================================
                     # CITATIONS
                     # =================================================
 
-                    st.subheader(
-                        "📚 Citations"
-                    )
+                    if (
+                        grounded
+                        and answer_source == "documents"
+                    ):
 
-                    if not citations:
-
-                        st.info(
-                            "No structured citation metadata "
-                            "was returned by the API."
+                        st.subheader(
+                            "📚 Citations"
                         )
 
-                    else:
+                        if not citations:
 
-                        for citation_id in citations:
-
-                            source = source_map.get(
-                                citation_id
+                            st.info(
+                                "No structured citation metadata "
+                                "was returned by the API."
                             )
 
-                            with st.container():
+                        else:
 
-                                st.markdown(
-                                    f"### Citation [{citation_id}]"
+                            for citation_id in citations:
+
+                                source = source_map.get(
+                                    citation_id
+                                )
+
+                                with st.container():
+
+                                    st.markdown(
+                                        f"### Citation [{citation_id}]"
+                                    )
+
+                                    # -----------------------------------------
+                                    # Source metadata
+                                    # -----------------------------------------
+
+                                    if source:
+
+                                        source_name = source.get(
+                                            "source",
+                                            "Unknown",
+                                        )
+
+                                        page = source.get(
+                                            "page"
+                                        )
+
+                                        human_page = source.get(
+                                            "human_page"
+                                        )
+
+                                        verified = source.get(
+                                            "verified",
+                                            False,
+                                        )
+
+                                        unsupported = source.get(
+                                            "unsupported",
+                                            False,
+                                        )
+
+                                        st.markdown(
+                                            f"**Source:** "
+                                            f"`{source_name}`"
+                                        )
+
+                                        if page is not None:
+
+                                            page_text = (
+                                                f"Page {page}"
+                                            )
+
+                                            if human_page is not None:
+
+                                                page_text += (
+                                                    f" "
+                                                    f"(Human page "
+                                                    f"{human_page})"
+                                                )
+
+                                            st.markdown(
+                                                f"**Page:** "
+                                                f"{page_text}"
+                                            )
+
+                                        # -------------------------------------
+                                        # Verification status
+                                        # -------------------------------------
+
+                                        if verified:
+
+                                            st.success(
+                                                "✓ Citation verified"
+                                            )
+
+                                        elif unsupported:
+
+                                            st.error(
+                                                "✗ Citation unsupported"
+                                            )
+
+                                        else:
+
+                                            st.info(
+                                                "Citation metadata available"
+                                            )
+
+                                        # -------------------------------------
+                                        # Scores
+                                        # -------------------------------------
+
+                                        reranker_score = source.get(
+                                            "reranker_score"
+                                        )
+
+                                        rrf_score = source.get(
+                                            "rrf_score"
+                                        )
+
+                                        if (
+                                            reranker_score is not None
+                                            or rrf_score is not None
+                                        ):
+
+                                            score_columns = st.columns(2)
+
+                                            with score_columns[0]:
+
+                                                if (
+                                                    reranker_score
+                                                    is not None
+                                                ):
+
+                                                    st.caption(
+                                                        "Reranker score"
+                                                    )
+
+                                                    st.write(
+                                                        f"{float(reranker_score):.4f}"
+                                                    )
+
+                                            with score_columns[1]:
+
+                                                if (
+                                                    rrf_score
+                                                    is not None
+                                                ):
+
+                                                    st.caption(
+                                                        "RRF score"
+                                                    )
+
+                                                    st.write(
+                                                        f"{float(rrf_score):.6f}"
+                                                    )
+
+                                    # -----------------------------------------
+                                    # No source metadata
+                                    # -----------------------------------------
+
+                                    else:
+
+                                        st.info(
+                                            f"Citation [{citation_id}] "
+                                            "was returned, but no matching "
+                                            "source metadata was returned."
+                                        )
+
+                                    st.divider()
+                    if (
+                        grounded
+                        and answer_source == "documents"
+                    ):
+
+                        # =================================================
+                        # RETRIEVED SOURCES
+                        # =================================================
+
+                        st.subheader(
+                            "📄 Retrieved Sources"
+                        )
+
+                        if not sources:
+
+                            st.info(
+                                "No retrieved source metadata "
+                                "was returned by the API."
+                            )
+
+                        else:
+
+                            for index, source in enumerate(
+                                sources,
+                                start=1,
+                            ):
+
+                                citation = source.get(
+                                    "citation"
+                                )
+
+                                source_name = source.get(
+                                    "source",
+                                    "Unknown",
+                                )
+
+                                page = source.get(
+                                    "page"
+                                )
+
+                                human_page = source.get(
+                                    "human_page"
+                                )
+
+                                verified = source.get(
+                                    "verified",
+                                    False,
+                                )
+
+                                unsupported = source.get(
+                                    "unsupported",
+                                    False,
                                 )
 
                                 # -----------------------------------------
-                                # Source metadata
+                                # Title
                                 # -----------------------------------------
 
-                                if source:
+                                if citation:
 
-                                    source_name = source.get(
-                                        "source",
-                                        "Unknown",
+                                    title = (
+                                        f"{citation} "
+                                        f"{source_name}"
                                     )
 
-                                    page = source.get(
-                                        "page"
+                                else:
+
+                                    title = (
+                                        f"Source {index}: "
+                                        f"{source_name}"
                                     )
 
-                                    human_page = source.get(
-                                        "human_page"
-                                    )
-
-                                    verified = source.get(
-                                        "verified",
-                                        False,
-                                    )
-
-                                    unsupported = source.get(
-                                        "unsupported",
-                                        False,
-                                    )
+                                with st.expander(
+                                    title,
+                                    expanded=False,
+                                ):
 
                                     st.markdown(
                                         f"**Source:** "
@@ -681,378 +919,203 @@ if ask_clicked:
 
                                     if page is not None:
 
-                                        page_text = (
-                                            f"Page {page}"
-                                        )
-
-                                        if human_page is not None:
-
-                                            page_text += (
-                                                f" "
-                                                f"(Human page "
-                                                f"{human_page})"
-                                            )
-
                                         st.markdown(
                                             f"**Page:** "
-                                            f"{page_text}"
+                                            f"{page}"
                                         )
 
-                                    # -------------------------------------
-                                    # Verification status
-                                    # -------------------------------------
+                                    if human_page is not None:
 
-                                    if verified:
-
-                                        st.success(
-                                            "✓ Citation verified"
+                                        st.markdown(
+                                            f"**Human page:** "
+                                            f"{human_page}"
                                         )
 
-                                    elif unsupported:
+                                    chunk_id = source.get(
+                                        "id"
+                                    )
 
-                                        st.error(
-                                            "✗ Citation unsupported"
+                                    if chunk_id:
+
+                                        st.markdown(
+                                            f"**Chunk ID:** "
+                                            f"`{chunk_id}`"
                                         )
-
-                                    else:
-
-                                        st.info(
-                                            "Citation metadata available"
-                                        )
-
-                                    # -------------------------------------
-                                    # Scores
-                                    # -------------------------------------
 
                                     reranker_score = source.get(
                                         "reranker_score"
                                     )
 
+                                    if reranker_score is not None:
+
+                                        st.markdown(
+                                            "**Reranker score:** "
+                                            f"{float(reranker_score):.4f}"
+                                        )
+
                                     rrf_score = source.get(
                                         "rrf_score"
                                     )
 
-                                    if (
-                                        reranker_score is not None
-                                        or rrf_score is not None
-                                    ):
+                                    if rrf_score is not None:
 
-                                        score_columns = st.columns(2)
+                                        st.markdown(
+                                            "**RRF score:** "
+                                            f"{float(rrf_score):.6f}"
+                                        )
 
-                                        with score_columns[0]:
+                                    if verified:
 
-                                            if (
-                                                reranker_score
-                                                is not None
-                                            ):
+                                        st.success(
+                                            "✓ Verified citation"
+                                        )
 
-                                                st.caption(
-                                                    "Reranker score"
-                                                )
+                                    elif unsupported:
 
-                                                st.write(
-                                                    f"{float(reranker_score):.4f}"
-                                                )
+                                        st.error(
+                                            "✗ Unsupported citation"
+                                        )
+                    if (
+                        grounded
+                        and answer_source == "documents"
+                        and citation_verification
+                    ):
 
-                                        with score_columns[1]:
+                        # =================================================
+                        # CITATION VERIFICATION
+                        # =================================================
 
-                                            if (
-                                                rrf_score
-                                                is not None
-                                            ):
+                        # =================================================
 
-                                                st.caption(
-                                                    "RRF score"
-                                                )
-
-                                                st.write(
-                                                    f"{float(rrf_score):.6f}"
-                                                )
-
-                                # -----------------------------------------
-                                # No source metadata
-                                # -----------------------------------------
-
-                                else:
-
-                                    st.info(
-                                        f"Citation [{citation_id}] "
-                                        "was returned, but no matching "
-                                        "source metadata was returned."
-                                    )
-
-                                st.divider()
-
-                    # =================================================
-                    # RETRIEVED SOURCES
-                    # =================================================
-
-                    st.subheader(
-                        "📄 Retrieved Sources"
-                    )
-
-                    if not sources:
-
-                        st.info(
-                            "No retrieved source metadata "
-                            "was returned by the API."
-                        )
-
-                    else:
-
-                        for index, source in enumerate(
-                            sources,
-                            start=1,
-                        ):
-
-                            citation = source.get(
-                                "citation"
-                            )
-
-                            source_name = source.get(
-                                "source",
-                                "Unknown",
-                            )
-
-                            page = source.get(
-                                "page"
-                            )
-
-                            human_page = source.get(
-                                "human_page"
-                            )
-
-                            verified = source.get(
-                                "verified",
-                                False,
-                            )
-
-                            unsupported = source.get(
-                                "unsupported",
-                                False,
-                            )
-
-                            # -----------------------------------------
-                            # Title
-                            # -----------------------------------------
-
-                            if citation:
-
-                                title = (
-                                    f"{citation} "
-                                    f"{source_name}"
-                                )
-
-                            else:
-
-                                title = (
-                                    f"Source {index}: "
-                                    f"{source_name}"
-                                )
+                        if citation_verification:
 
                             with st.expander(
-                                title,
-                                expanded=False,
+                                "🔎 Citation Verification"
                             ):
 
-                                st.markdown(
-                                    f"**Source:** "
-                                    f"`{source_name}`"
+                                verified_items = (
+                                    citation_verification.get(
+                                        "verified",
+                                        [],
+                                    )
                                 )
 
-                                if page is not None:
+                                unsupported_items = (
+                                    citation_verification.get(
+                                        "unsupported",
+                                        [],
+                                    )
+                                )
+
+                                invalid_items = (
+                                    citation_verification.get(
+                                        "invalid",
+                                        [],
+                                    )
+                                )
+
+                                st.write(
+                                    "Verified:",
+                                    len(verified_items)
+                                )
+
+                                st.write(
+                                    "Unsupported:",
+                                    len(unsupported_items)
+                                )
+
+                                st.write(
+                                    "Invalid:",
+                                    len(invalid_items)
+                                )
+
+                                if verified_items:
 
                                     st.markdown(
-                                        f"**Page:** "
-                                        f"{page}"
+                                        "**Verified citations**"
                                     )
 
-                                if human_page is not None:
+                                    for item in verified_items:
 
-                                    st.markdown(
-                                        f"**Human page:** "
-                                        f"{human_page}"
-                                    )
+                                        if isinstance(
+                                            item,
+                                            dict,
+                                        ):
 
-                                chunk_id = source.get(
-                                    "id"
-                                )
+                                            citation_number = item.get(
+                                                "citation"
+                                            )
 
-                                if chunk_id:
+                                            claim = item.get(
+                                                "claim"
+                                            )
 
-                                    st.markdown(
-                                        f"**Chunk ID:** "
-                                        f"`{chunk_id}`"
-                                    )
+                                            if citation_number:
 
-                                reranker_score = source.get(
-                                    "reranker_score"
-                                )
+                                                st.write(
+                                                    f"✓ [{citation_number}]"
+                                                )
 
-                                if reranker_score is not None:
+                                            if claim:
 
-                                    st.markdown(
-                                        "**Reranker score:** "
-                                        f"{float(reranker_score):.4f}"
-                                    )
+                                                st.caption(
+                                                    str(claim)
+                                                )
 
-                                rrf_score = source.get(
-                                    "rrf_score"
-                                )
-
-                                if rrf_score is not None:
-
-                                    st.markdown(
-                                        "**RRF score:** "
-                                        f"{float(rrf_score):.6f}"
-                                    )
-
-                                if verified:
-
-                                    st.success(
-                                        "✓ Verified citation"
-                                    )
-
-                                elif unsupported:
-
-                                    st.error(
-                                        "✗ Unsupported citation"
-                                    )
-
-                    # =================================================
-                    # CITATION VERIFICATION
-                    # =================================================
-
-                    if citation_verification:
-
-                        with st.expander(
-                            "🔎 Citation Verification"
-                        ):
-
-                            verified_items = (
-                                citation_verification.get(
-                                    "verified",
-                                    [],
-                                )
-                            )
-
-                            unsupported_items = (
-                                citation_verification.get(
-                                    "unsupported",
-                                    [],
-                                )
-                            )
-
-                            invalid_items = (
-                                citation_verification.get(
-                                    "invalid",
-                                    [],
-                                )
-                            )
-
-                            st.write(
-                                "Verified:",
-                                len(verified_items)
-                            )
-
-                            st.write(
-                                "Unsupported:",
-                                len(unsupported_items)
-                            )
-
-                            st.write(
-                                "Invalid:",
-                                len(invalid_items)
-                            )
-
-                            if verified_items:
-
-                                st.markdown(
-                                    "**Verified citations**"
-                                )
-
-                                for item in verified_items:
-
-                                    if isinstance(
-                                        item,
-                                        dict,
-                                    ):
-
-                                        citation_number = item.get(
-                                            "citation"
-                                        )
-
-                                        claim = item.get(
-                                            "claim"
-                                        )
-
-                                        if citation_number:
+                                        else:
 
                                             st.write(
-                                                f"✓ [{citation_number}]"
+                                                f"✓ {item}"
                                             )
 
-                                        if claim:
+                                if unsupported_items:
 
-                                            st.caption(
-                                                str(claim)
-                                            )
-
-                                    else:
-
-                                        st.write(
-                                            f"✓ {item}"
-                                        )
-
-                            if unsupported_items:
-
-                                st.markdown(
-                                    "**Unsupported citations**"
-                                )
-
-                                for item in unsupported_items:
-
-                                    if isinstance(
-                                        item,
-                                        dict,
-                                    ):
-
-                                        citation_number = item.get(
-                                            "citation"
-                                        )
-
-                                        st.write(
-                                            f"⚠ [{citation_number}]"
-                                        )
-
-                                        claim = item.get(
-                                            "claim"
-                                        )
-
-                                        if claim:
-
-                                            st.caption(
-                                                str(claim)
-                                            )
-
-                                    else:
-
-                                        st.write(
-                                            f"⚠ {item}"
-                                        )
-
-                            if invalid_items:
-
-                                st.markdown(
-                                    "**Invalid citations**"
-                                )
-
-                                for item in invalid_items:
-
-                                    st.write(
-                                        f"✗ {item}"
+                                    st.markdown(
+                                        "**Unsupported citations**"
                                     )
 
+                                    for item in unsupported_items:
+
+                                        if isinstance(
+                                            item,
+                                            dict,
+                                        ):
+
+                                            citation_number = item.get(
+                                                "citation"
+                                            )
+
+                                            st.write(
+                                                f"⚠ [{citation_number}]"
+                                            )
+
+                                            claim = item.get(
+                                                "claim"
+                                            )
+
+                                            if claim:
+
+                                                st.caption(
+                                                    str(claim)
+                                                )
+
+                                        else:
+
+                                            st.write(
+                                                f"⚠ {item}"
+                                            )
+
+                                if invalid_items:
+
+                                    st.markdown(
+                                        "**Invalid citations**"
+                                    )
+
+                                    for item in invalid_items:
+
+                                        st.write(
+                                            f"✗ {item}"
+                                        )
                     # =================================================
                     # RETRIEVAL INFORMATION
                     # =================================================
